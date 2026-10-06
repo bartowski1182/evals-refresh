@@ -125,6 +125,12 @@ No sample emitted a pseudo tool call as plain text.
 
 ## Patches for upstream
 
+**Known issue (results affected).** Every DeepSWE task denies network to its agent and verifier, but the
+inspect_harbor version used here ignored those settings, so agents had internet access. Fixed in
+[meridianlabs-ai/inspect_harbor#200](https://github.com/meridianlabs-ai/inspect_harbor/pull/200). Until it is
+released, install inspect_harbor from `eldarkurtic/inspect_harbor@fix/enforce-agent-network-mode`, as the
+`*_Qwen3.8-Flash-Next*` DeepSWE dirs do, and rerun before quoting these numbers.
+
 - `inspect_harbor` up to 0.7.5 ignored the `[[verifier.collect]]` hook every DeepSWE task declares (the
   `git diff --binary <base_commit> HEAD > /logs/artifacts/model.patch` that the grader applies in a `separate`
   verifier environment) and graded the pristine base state. Fixed upstream in

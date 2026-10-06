@@ -118,6 +118,14 @@ both `.eval` files.
 
 ## Patches for upstream
 
+**Known issue (results affected).** These runs used `inspect_evals`' default Epoch AI images, which keep every
+release tag of the project, so the reference fix is readable offline (for example `git show
+3.0:django/contrib/auth/validators.py` in django__django-11099). The `*_Qwen3.8-Flash-Next*` SWE-bench Verified
+dirs use the official SWE-bench images instead (`-T
+image_name_template=swebench/sweb.eval.{arch}.{org}_1776_{repo}-{issue}:latest`), which are clean. Reported
+upstream as [UKGovernmentBEIS/inspect_evals#2632](https://github.com/UKGovernmentBEIS/inspect_evals/issues/2632)
+(`inspect_evals` would switch `DEFAULT_IMAGE_TEMPLATE`).
+
 `inspect_evals` declares `swebench>=3.0.15` but its scorer imports `MAP_REPO_VERSION_TO_SPECS` and
 `swebench.harness.test_spec`, which swebench 5.0 removed, so a fresh install resolves 5.x and every sample errors at
 scoring time (swebench 4.1.0 works). Reported as https://github.com/UKGovernmentBEIS/inspect_evals/issues/2545; the

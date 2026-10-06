@@ -125,6 +125,15 @@ No sample emitted a pseudo tool call as plain text. 6 turns hit the per-turn `ma
 
 ## Patches for upstream
 
+**Known issue (results affected).** These results come from the published SWE-bench Pro tasks, which leak the
+reference solution to the agent: agents have internet access, and the task images keep the project's future git
+history, including the gold commit. The numbers are likely inflated and are not comparable to leak-free runs. Fixed
+in [harbor-framework/harbor-datasets#263](https://github.com/harbor-framework/harbor-datasets/pull/263) (agent
+offline, history removed, gold tests shipped with the verifier) together with
+[meridianlabs-ai/inspect_harbor#200](https://github.com/meridianlabs-ai/inspect_harbor/pull/200) (per-phase network
+modes). The `*_Qwen3.8-Flash-Next*/agentic-and-coding/swe-bench-pro` dirs run with both. Rerun this task with that
+setup before quoting these numbers.
+
 Three environment defects in the published tasks make several task families ungradable as published (the reference
 solutions score 0), all in the verifier scripts:
 
