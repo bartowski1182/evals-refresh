@@ -7,9 +7,11 @@ unless it says "hint".
 
 ## 0. Local environment notes
 
-`local_env_notes.md`, next to this file, holds host-specific facts (GPUs, caches, venv paths, Docker setup,
-serving conventions) for the machine this checkout runs on. Read it before running anything and update it
-when the host changes; it is imported below so that Claude Code loads it with this file.
+`local_env_notes.md`, next to this file, holds environment requirements and pitfalls that apply to any host
+(serving, caches, Docker setup, image pulls, venvs). Read it before running anything; it is imported below so
+that Claude Code loads it with this file. It is committed and used on other servers, so keep it general. Facts
+about one machine (paths, user names, installed versions, other tenants) go in `local_env_notes.local.md`,
+which git ignores; read it too if it exists.
 
 @local_env_notes.md
 
@@ -64,6 +66,10 @@ when the host changes; it is imported below so that Claude Code loads it with th
 
 - **Never `git commit` or `git push`.** Leave changes in the working tree and say what changed.
   Committing is the repo owner's job.
+- **Keep every agent instruction in this file.** `CLAUDE.md` only imports it (`@AGENTS.md`), so Claude Code and
+  other agent harnesses read the same rules. Do not add content to `CLAUDE.md`, including what `/init` proposes;
+  put conventions here, environment notes that apply to any host in `local_env_notes.md`, and facts about one
+  machine in `local_env_notes.local.md`.
 - **Never put secrets in the repo.** `HF_TOKEN`, API keys and other secrets should be local on
   the user's machine. 
 - **Ask before deciding anything that changes what is measured**: protocol, subset, judge model,
@@ -218,9 +224,85 @@ Python.
   for LiveCodeBench; pin via `assets/harbor_registry.json` + `inspect_harbor/harbor -T registry_path=...`.
 - **Models sometimes emit pseudo tool calls as plain text** (Gemma: `<div class="tool_call">`);
   the ReAct loop then re-prompts until the time limit. Count these in the README as "no solution".
-- **GitHub's API is rate-limited and `gh` is not logged in** on the reference host; use
-  `git ls-remote` / shallow clones instead.
+- **GitHub's API is rate-limited without a login**; use `git ls-remote` / shallow clones instead,
+  or log in with `gh auth login`.
 - **vLLM prints an `EngineDeadError` traceback at shutdown** when the orchestrator kills it.
   It is noise if it appears at the moment the eval finished.
 - **Inspect's multiple-choice parser** requires `ANSWER: <LETTER>` on the last line; a model that
   writes `ANSWER: $A` can never be parsed. Check the unparsed count.
+
+## 10. Conventions established in the task directories
+
+Sections 1-9 set the defaults. The existing task dirs depart from some of them on purpose, and each README
+says why. When you touch a task, follow the same task under the other model instead of the defaults, and do not
+revert these departures:
+
+- **No build, lint or unit tests.** The only test is the smoke run from inside a task dir
+  (`EPOCHS=1 ./local_orchestrator.sh --limit 5`; use `--limit 2` for agentic tasks). It needs the GPUs, and Docker
+  for sandboxed tasks.
+- **Epoch defaults vary** (`EPOCHS` in `run_eval.sh`):
+  - 3: gpqa-diamond, livecodebench, terminal-bench-2.1, bfcl.
+  - 8: aime-2026 (only 30 problems).
+  - 1: mmlu-pro (12k samples), swe-bench-verified, swe-bench-pro, deepswe-1.1, gdpval-aa, tau2-bench, tau3-bench.
+  - 1 for every task of the four Qwen3.8-Flash-Next dirs (RedHatAI, Inferact and nvidia NVFP4, Qwen BF16), at the
+    user's request.
+- **Sampling flags.** Inspect's `vllm` provider drops `--top-k` from the request. The value that applies is the
+  server default vLLM takes from the checkpoint's `generation_config.json` (logged at vLLM startup).
+- **Qwen3.8-Flash-Next dirs** (8x B200 host):
+  - Serving: vLLM nightly, TP=1 × DP=4 set in `serve.sh`; the agentic dirs override it to TP=4 × DP=1 in
+    `local_orchestrator.sh`. The RedHatAI dirs use GPUs 0-3 on port 8000, the Inferact dirs GPUs 4-7 on port 8001,
+    the nvidia dirs GPUs 0-3 on port 8002, and the Qwen BF16 dirs GPUs 4-7 on port 8003.
+  - Qwen BF16: `serve.sh` sets TP=4 × DP=1 (the recipe needs at least 423 GB of VRAM per replica). That replica has
+    room for 9.5M KV-cache tokens against 20.4M for an NVFP4 TP=4 replica, and with about 100 agent sessions it
+    re-prefilled every history each turn. So its swe-bench-pro and deepswe-1.1 dirs run one TP=8 replica on all 8
+    GPUs (17.1M tokens), and terminal-bench-2.1 runs 45 concurrent samples instead of 89. The superseded runs are
+    kept in `logs/superseded_kv_thrash/`.
+  - Model loading: vLLM keeps the 51B n-gram table in pinned host memory. Start the two servers one after the
+    other, and keep `VLLM_ENGINE_READY_TIMEOUT_S` raised.
+  - RedHatAI's server venv carries a vLLM fix from the `eldarkurtic/vllm` fork (see its README).
+- **Serving topology for multi-turn tasks.** swe-bench-*, deepswe-1.1, bfcl, gdpval-aa, tau2-bench and tau3-bench
+  export `TP=8 DP=1` in `local_orchestrator.sh` instead of TP=2 × DP=4. vLLM's prefix cache is per replica, and
+  DP routes each turn to a random replica, so agent histories would be prefilled again on every turn. `serve.sh`
+  keeps the recipe defaults; the override lives only in the orchestrator.
+- **User simulator (tau2/tau3-bench).** Qwen/Qwen3.8-27B plays the customer for every model. The Qwen dirs reuse
+  the eval server. The Gemma dirs start a second server from `assets/serve_user_model.sh` on GPUs 4-7 and run
+  the model under test at TP=4 on GPUs 0-3. This is the one accepted exception to "one task directory, one
+  server".
+- **Docker for agent tasks.** `local_orchestrator.sh` exports `DOCKER_HOST` pointing at the rootless socket
+  (`/run/user/$UID/docker.sock`); the image store location is host-specific (see `local_env_notes.md`). Harbor tasks pass
+  `-T override_cpus=0`, because rootless Docker rejects CPU caps. In tau3-bench, containers reach the host's
+  vLLM through `CONTAINER_HOST_IP`, not localhost.
+- **Per-model assets.** Every Gemma dir carries two assets:
+  - `assets/tool_chat_template_gemma4.jinja`, the recipe's template, used by `serve.sh`.
+  - `assets/generate_config.json`, which turns thinking on per request.
+
+  Qwen dirs need neither, because `--reasoning-effort xhigh` does the job. The Gemma recipe URL is
+  `https://recipes.vllm.ai/Google/gemma-4-31B-it`: capital `G`, although the HF org is `google`.
+- **Client venvs are shared across dirs, but each dir pins different packages.**
+  - inspect_harbor: 0.7.5, 0.7.6, 1.0.0, or a git commit (tau3-bench; the Flash-Next swe-bench-pro and
+    deepswe-1.1 dirs).
+  - bfcl and the older swe-bench-verified dirs install inspect_evals from `eldarkurtic/inspect_evals` fork branches.
+
+  Check the venv against the dir's `client_requirements.txt` and its README Setup before a run.
+- **Harbor fork pins.** livecodebench, swe-bench-pro and deepswe-1.1 load their tasks through
+  `assets/harbor_registry.json`, which has one entry per task, each pinned to a commit of
+  `github.com/eldarkurtic/harbor-datasets`. `run_eval.sh` points `inspect_harbor/harbor -T registry_path=...` at
+  that file.
+- **SWE-style tasks can leak the solution to the agent: audit before trusting a score.**
+  - Stock inspect_harbor 1.0 applies only `[environment].network_mode`. It ignores `[agent]` and `[verifier]`
+    `network_mode`, so most containers have public internet. The Qwen3.8-Flash-Next `swe-bench-pro` and
+    `deepswe-1.1` dirs need the `eldarkurtic/inspect_harbor` fork (`~/.venvs/inspect-harbor-fix`), which applies
+    them per phase. With stock inspect_harbor, their agents silently get internet.
+  - Images with future git history: the published SWE-bench Pro images, the DeepSWE v1.0 images, and
+    inspect_evals' default Epoch AI images for SWE-bench Verified. Clean: the official `swebench/sweb.eval.*`
+    images and the DeepSWE v1.1 images.
+  - What agents did with this:
+    - SWE-bench Pro: they downloaded newer upstream releases, and the run was withdrawn.
+    - Terminal-Bench 2.1: one sample fetched its own task files from GitHub.
+  - Scan trajectories for `pip download`, `git fetch/clone`, `curl github` and `git log --all`. The
+    Qwen3.8-Flash-Next `swe-bench-pro`, `swe-bench-verified` and `deepswe-1.1` READMEs describe the fixes.
+  - Validate a dataset or verifier change with `--solver inspect_harbor/oracle` on every image family. Image
+    families differ even within one repo; for example, the Alpine images' BusyBox `tar` lacks GNU options.
+- **Every task exists once per model.** Do not mirror an edit into the other model's copy unless asked.
+- **Coverage matrix.** When you add a task, set ✅ in the `Repo` column of `eval_coverage_matrix.md` in both
+  places: the Benchmarks table and the per-subclass detail table.
