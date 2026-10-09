@@ -66,10 +66,22 @@ which git ignores; read it too if it exists.
 
 - **Never `git commit` or `git push`.** Leave changes in the working tree and say what changed.
   Committing is the repo owner's job.
+- **Pull before you start, and read what came in.** Several hosts push to this repo. Fixes and conventions found on
+  one host (e.g. the leak fixes of section 11) reach you only through a pull, so before copying a task dir, check
+  the newest copies of that task under every model. If a pull brings a task dir that you also have locally, the two
+  are probably different runs: compare them, ask the user which one is final, and move the other out of the repo
+  with its logs (a README must match the logs next to it).
+- **Reflect after every eval and every meaningful piece of work, and write the general lessons into the notes.**
+  This is mandatory; section 12 gives the procedure.
 - **Keep every agent instruction in this file.** `CLAUDE.md` only imports it (`@AGENTS.md`), so Claude Code and
   other agent harnesses read the same rules. Do not add content to `CLAUDE.md`, including what `/init` proposes;
   put conventions here, environment notes that apply to any host in `local_env_notes.md`, and facts about one
   machine in `local_env_notes.local.md`.
+- **Never refer to a local venv as if it exists.** Venvs are local to one user and server, and other users won't
+  have yours. In this file, `local_env_notes.md` and READMEs, describe an environment by its packages (the dir's
+  requirements files or pins) and give the commands to create it. Real paths live only in `local_orchestrator.sh`
+  and `local_env_notes.local.md`. A README's Setup commands may create the environments at the paths the
+  orchestrator activates, as long as the README says to change both together.
 - **Never put secrets in the repo.** `HF_TOKEN`, API keys and other secrets should be local on
   the user's machine. 
 - **Ask before deciding anything that changes what is measured**: protocol, subset, judge model,
@@ -79,24 +91,38 @@ which git ignores; read it too if it exists.
   agentic tasks), read the samples, and only then launch the full run. Verify in the log that
   reasoning was parsed into a separate `reasoning` content part, that `stop_reason` is `stop`
   (not `max_tokens`), and that the config you intended is what `eval.model_generate_config` recorded.
-- **avg@3 is the default** (`--epochs 3 --epochs-reducer mean`), matching the vendors' cards.
-  Deviate only with the user's agreement and say so in the README.
+- **Audit every run of a task with tools for cheating before you report it** (exec tier `sandbox` or `agent`).
+  Some models fetch a task's solution from the internet or from git history instead of solving it. Before the run,
+  close every leak the task allows; after the run, scan the trajectories. Section 11 lists the fixes and the audit.
+- **One epoch is the default** (`--epochs 1`, pass@1) for every benchmark, new task and new model. Run more
+  epochs (`EPOCHS=N`, `--epochs-reducer mean`, avg@N) only when the user asks for them, and say so in the README.
+  When you copy a task dir whose `run_eval.sh` defaults to more epochs, set its `EPOCHS` default back to 1. The
+  defaults in existing dirs record what produced their results (section 10).
 - **Results go in the README as data, not narrative.** Fill the Results template (below). Do not
   describe failed attempts, ablations, or how you got there in the README. README only contains
   final results, everything else should be discussed with the user in chat.
+- **Headline scores over all samples.** Sample errors and unscored samples count as failures (0; in avg@N, 0 for
+  that epoch), so every model is scored with the same denominator, e.g. "0.336 (38 of 113)". List the errors
+  separately and compute stderr the same way. Never headline a scored-only rate: errored samples differ between
+  models, and they are often the longest, unfinished trajectories. Some older READMEs headline errors-excluded
+  numbers; recompute their all-samples figure before comparing with them.
 - **One task directory, one server.** Do not add multi-model orchestration, judges on split GPUs,
   or background daemons. If a task needs a judge, run judging as a separate phase
   (`inspect eval --no-score`, then `inspect score --model-role grader=...`) and document it.
 
-## 4. Environment on the reference host (adapt in `local_orchestrator.sh`)
+## 4. Python environments (adapt in `local_orchestrator.sh`)
 
-Three venvs, deliberately separate:
+Three environments, deliberately separate. They are local to each user and server, so create your own, name and place
+them as you like, and point `local_orchestrator.sh` at them; it is the only file that knows their paths.
 
-| venv | used by | install |
+| environment | used by | create with |
 |---|---|---|
-| `~/.venvs/vllm` | `serve.sh` | `pip install vllm` |
-| `~/.venvs/inspect` | `run_eval.sh` for `inspect_evals` tasks | `pip install inspect-evals openai` |
-| `~/.venvs/inspect-harbor` | `run_eval.sh` for `inspect_harbor` tasks | `pip install inspect-harbor httpx2 "openai==3.14.0"` |
+| vLLM server | `serve.sh` | `pip install vllm` |
+| Inspect client for `inspect_evals` tasks | `run_eval.sh` | `pip install inspect-evals openai` |
+| Inspect client for `inspect_harbor` tasks | `run_eval.sh` | `pip install inspect-harbor httpx2 "openai==3.14.0"` |
+
+These installs are the starting point for a new task. To reproduce a dir's results, create the environments from its
+`server_requirements.txt` and `client_requirements.txt` instead, as its README Setup shows.
 
 `inspect-harbor` depends on `litellm`, which pins `openai<3`, while Inspect's OpenAI-compatible
 providers need `openai>=3`; installing `openai==3.14.0` last overrides the pin and the resulting
@@ -108,7 +134,7 @@ recent `inspect-ai` but not declared.
 ```bash
 cd <org>_<model>/<category>/<task>
 EPOCHS=1 ./local_orchestrator.sh --limit 5     # smoke test; inspect the samples first
-./local_orchestrator.sh                        # full avg@3
+./local_orchestrator.sh                        # full run (EPOCHS=N for more epochs, if the user asks)
 inspect view --log-dir ./logs                  # browse samples (port 7575)
 ```
 
@@ -132,6 +158,11 @@ for s in log.samples:
 If a run is interrupted, `inspect eval-retry logs/<file>.eval` reruns only unfinished samples and
 keeps completed ones. It reuses the log's task and args; env vars still apply.
 
+To add epochs to a finished run (when the user asks for avg@N), keep the existing log as epoch 1, run
+`EPOCHS=<N-1>` into its own log dir with the same concurrency (in agentic tasks the number of samples in flight
+changes the time-limit hits), and combine with a per-task mean over all N epochs. Every log numbers its epochs
+from 1: map them to overall epochs before you report per-epoch numbers or point to a sample.
+
 ## 6. README template (fill exactly this, nothing more)
 
 ```
@@ -154,7 +185,7 @@ keeps completed ones. It reuses the log's task and args; env vars still apply.
 With model generation config:
 `<eval.model_generate_config, plus epochs, limits, client_timeout>`
 the following scores and token stats are obtained:
-| metric | value |                       accuracy (avg@3), stderr, per-epoch, samples,
+| metric | value |                       accuracy (pass@1, or avg@N if asked for), stderr, per-epoch, samples,
                                           truncated / time-limit hits, unparsed / no-solution, sample errors
 | tokens / sample | input | output | reasoning |   mean / median / max
 <one line on how to read the token numbers if non-obvious; list of always-failing tasks for agentic evals>
@@ -170,7 +201,8 @@ Python.
 
 ## 7. Adding a new model
 
-1. Create `<org>_<model>/<category>/<task>/` by copying the closest existing task dir.
+1. Create `<org>_<model>/<category>/<task>/` by copying the closest existing task dir. For a task listed in
+   section 11, copy the dir named there, which carries the leak fixes.
 2. `serve.sh`: rewrite from the model's vLLM recipe. Keep only what the recipe says plus
    `--tensor-parallel-size`, `--data-parallel-size`, `--served-model-name`, `--host/--port`.
    Confirm the reasoning parser and tool parser names exist in the installed vLLM
@@ -186,8 +218,8 @@ Python.
 
 ## 8. Adding a new task
 
-1. Find it in `eval_coverage_matrix.md`. `inspect_evals` tasks run in `~/.venvs/inspect`;
-   `inspect_harbor` tasks (`Where` = `inspect_harbor`) need `~/.venvs/inspect-harbor` and Docker.
+1. Find it in `eval_coverage_matrix.md`. `inspect_evals` tasks run in the `inspect_evals` client environment;
+   `inspect_harbor` tasks (`Where` = `inspect_harbor`) need the `inspect_harbor` one (section 4) and Docker.
    `PARTIAL` / `MISSING` rows are not the benchmark the cards report; say so if asked.
 2. Read the task's README in the package and its task signature (`inspect list tasks`, or import
    it). Identify: dataset and pinned revision, gating (HF token / terms), subset flags,
@@ -201,7 +233,9 @@ Python.
    `--max-connections` (Inspect holds a container per in-flight sample), set `--time-limit` as a
    runaway guard and report hits, and use `--fail-on-error 0.1` so one infra error cannot abort
    a multi-hour run while a systematic one still does. Per-turn `--max-tokens` must leave room
-   for multi-turn history inside the context window (65536 was used with a 262k window).
+   for multi-turn history inside the context window (65536 was used with a 262k window). Find out how
+   the task could leak its solution (network policy in each `task.toml`, git history in the images, public
+   copies of the task files), close what you can, and add the task to section 11.
 6. Judged tasks: no external APIs are assumed. Plan a local judge as a separate scoring phase and
    keep it identical across models.
 
@@ -240,7 +274,8 @@ revert these departures:
 - **No build, lint or unit tests.** The only test is the smoke run from inside a task dir
   (`EPOCHS=1 ./local_orchestrator.sh --limit 5`; use `--limit 2` for agentic tasks). It needs the GPUs, and Docker
   for sandboxed tasks.
-- **Epoch defaults vary** (`EPOCHS` in `run_eval.sh`):
+- **Epoch defaults of existing dirs vary** (`EPOCHS` in `run_eval.sh`). They record what produced each README's
+  results and predate the one-epoch default of section 3; new runs use 1 epoch unless the user asks for more:
   - 3: gpqa-diamond, livecodebench, terminal-bench-2.1, bfcl.
   - 8: aime-2026 (only 30 problems).
   - 1: mmlu-pro (12k samples), swe-bench-verified, swe-bench-pro, deepswe-1.1, gdpval-aa, tau2-bench, tau3-bench.
@@ -278,31 +313,120 @@ revert these departures:
 
   Qwen dirs need neither, because `--reasoning-effort xhigh` does the job. The Gemma recipe URL is
   `https://recipes.vllm.ai/Google/gemma-4-31B-it`: capital `G`, although the HF org is `google`.
-- **Client venvs are shared across dirs, but each dir pins different packages.**
+- **Each dir pins its own client packages.**
   - inspect_harbor: 0.7.5, 0.7.6, 1.0.0, or a git commit (tau3-bench; the Flash-Next swe-bench-pro and
     deepswe-1.1 dirs).
   - bfcl and the older swe-bench-verified dirs install inspect_evals from `eldarkurtic/inspect_evals` fork branches.
 
-  Check the venv against the dir's `client_requirements.txt` and its README Setup before a run.
+  Before a run, create the client environment from the dir's `client_requirements.txt` and README Setup, or check
+  that an environment you already have matches it.
 - **Harbor fork pins.** livecodebench, swe-bench-pro and deepswe-1.1 load their tasks through
   `assets/harbor_registry.json`, which has one entry per task, each pinned to a commit of
   `github.com/eldarkurtic/harbor-datasets`. `run_eval.sh` points `inspect_harbor/harbor -T registry_path=...` at
   that file.
-- **SWE-style tasks can leak the solution to the agent: audit before trusting a score.**
-  - Stock inspect_harbor 1.0 applies only `[environment].network_mode`. It ignores `[agent]` and `[verifier]`
-    `network_mode`, so most containers have public internet. The Qwen3.8-Flash-Next `swe-bench-pro` and
-    `deepswe-1.1` dirs need the `eldarkurtic/inspect_harbor` fork (`~/.venvs/inspect-harbor-fix`), which applies
-    them per phase. With stock inspect_harbor, their agents silently get internet.
-  - Images with future git history: the published SWE-bench Pro images, the DeepSWE v1.0 images, and
-    inspect_evals' default Epoch AI images for SWE-bench Verified. Clean: the official `swebench/sweb.eval.*`
-    images and the DeepSWE v1.1 images.
-  - What agents did with this:
-    - SWE-bench Pro: they downloaded newer upstream releases, and the run was withdrawn.
-    - Terminal-Bench 2.1: one sample fetched its own task files from GitHub.
-  - Scan trajectories for `pip download`, `git fetch/clone`, `curl github` and `git log --all`. The
-    Qwen3.8-Flash-Next `swe-bench-pro`, `swe-bench-verified` and `deepswe-1.1` READMEs describe the fixes.
-  - Validate a dataset or verifier change with `--solver inspect_harbor/oracle` on every image family. Image
-    families differ even within one repo; for example, the Alpine images' BusyBox `tar` lacks GNU options.
+- **SWE-style tasks can leak the solution to the agent.** Only the Qwen3.8-Flash-Next dirs carry the fixes;
+  the other dirs of deepswe-1.1, swe-bench-pro and swe-bench-verified ran without them. See section 11.
 - **Every task exists once per model.** Do not mirror an edit into the other model's copy unless asked.
 - **Coverage matrix.** When you add a task, set ✅ in the `Repo` column of `eval_coverage_matrix.md` in both
   places: the Benchmarks table and the per-subclass detail table.
+
+## 11. Solution leaks: fixes to use and the audit after every run
+
+An agent with tools can take a task's solution instead of solving it: fetch it from the internet, or read it from
+the project's future git history inside the image. Models differ in how hard they try, so close every leak a task
+allows before the run, and audit the trajectories after it.
+
+**Fixes.** Copy deepswe-1.1, swe-bench-pro and swe-bench-verified from the Qwen3.8-Flash-Next dirs
+(`Qwen_Qwen3.8-Flash-Next`, `RedHatAI_Qwen3.8-Flash-Next-NVFP4`, `Inferact_Qwen3.8-Flash-Next-NVFP4`,
+`nvidia_Qwen3.8-Flash-Next-NVFP4`). The `Qwen_Qwen3.8-27B`, `google_gemma-4-31B-it`, `RedHatAI_Qwen3.8-27B-MXFP4`
+and `amd_Qwen3.8-27B-Quark-AWQ-MXFP4` copies of these tasks ran before the fixes; don't reuse their client setup.
+
+- **deepswe-1.1.** Every `task.toml` sets `network_mode = "no-network"` for `[agent]` and `[verifier]`, but stock
+  inspect_harbor (1.0.0 and earlier) applies only `[environment].network_mode`, so agents silently get internet.
+  - Fix: install inspect_harbor from the fork `eldarkurtic/inspect_harbor@cb61925` (branch
+    `fix/enforce-agent-network-mode`), which applies the network mode per phase. Create the client environment
+    from a Flash-Next deepswe-1.1 dir's `client_requirements.txt`, which pins that commit; `local_env_notes.md`
+    gives the install caveats.
+  - Upstream: meridianlabs-ai/inspect_harbor#200. Once a release carries it, switch back to the release.
+  - Use the v1.1 task images. The v1.0 images keep future `origin/*` refs.
+- **swe-bench-pro.** The published tasks give the agent internet, and their images keep the project's future git
+  history, including the gold commit. Agents downloaded newer upstream releases, and one run was withdrawn.
+  - Fix: the inspect_harbor fork above, plus `assets/harbor_registry.json` pinned to
+    `eldarkurtic/harbor-datasets@d81053e87b`. That pin carries harbor-framework/harbor-datasets#263: the agent is
+    offline, the history is removed, and the gold tests ship with the verifier.
+  - The older pin `2494eda6ae` has only the verifier fixes (#258), not the leak fixes.
+- **swe-bench-verified.** inspect_evals' default Epoch AI images keep every release tag of the project, so the
+  reference fix is readable offline (`git show <later tag>:<file>`).
+  - Fix: use the official images, `-T image_name_template=swebench/sweb.eval.{arch}.{org}_1776_{repo}-{issue}:latest`
+    (UKGovernmentBEIS/inspect_evals#2632). The agent has no internet by the task's default.
+- **terminal-bench-2.1.** Every task sets `allow_internet = true`, and several verifiers `apt-get install` at test
+  time, so the network can't be closed.
+  - The task files, including `solution/solve.sh` and `tests/`, are public: `harbor-framework/terminal-bench-2-1`
+    on GitHub, and mirrors on the HF Hub (find them with `huggingface.co/api/datasets?search=terminal-bench`).
+  - Only the audit catches it when an agent downloads its own task's files.
+- **livecodebench.** The tasks set no network policy, so the agent has internet (the fork changes nothing). Audit
+  for lookups of the problem's published solutions.
+- **Any new task with tools.** Check each `task.toml` network policy against what the runner enforces (after a run,
+  Harbor's task files are cached under `~/.cache/harbor/tasks/packages/` and `~/.cache/inspect_harbor/tasks/git/`;
+  tasks loaded from a registry pin can be read from the pinned commit with a shallow fetch). Check the
+  images for refs and tags newer than the base commit (`git log --all`, `git tag`, unreachable objects). Search for
+  public copies of the task files. Then add the task to this list.
+- Validate a dataset or verifier change with `--solver inspect_harbor/oracle` on every image family. Image
+  families differ even within one repo; for example, the Alpine images' BusyBox `tar` lacks GNU options.
+
+**Audit after every run, before you fill Results.** Scan every tool call of every sample in the final `.eval`
+logs. Read `sample.events`, not `sample.messages`: context compaction drops early turns from the messages.
+
+```python
+import json, re
+from inspect_ai.log import read_eval_log
+NET = re.compile(r"pip3? (download|index)|git (fetch|clone|pull|ls-remote|remote add)|git log [^|;&\n]*--all"
+                 r"|github\.com|githubusercontent|gitlab\.com|huggingface\.co|pypi\.org|registry\.npmjs|npm (view|pack)"
+                 r"|proxy\.golang|go (get|install|mod download)|crates\.io|curl |wget |urlopen|requests\.get", re.I)
+log = read_eval_log("logs/<file>.eval", resolve_attachments=True)
+for s in log.samples:
+    for ev in s.events:
+        if ev.event == "tool" and NET.search(cmd := json.dumps(ev.arguments)):
+            print(s.id, s.epoch, {k: v.value for k, v in (s.scores or {}).items()}, cmd[:300], str(ev.result)[:300])
+```
+
+- Networked tasks give hundreds of hits; review them by hand.
+- A leak is any case where the agent obtained:
+  - its own task's files (`solution/`, `tests/`);
+  - the project's upstream work past the task's base commit: GitHub issues, PRs, commits or files, or a clone or
+    fetch of the upstream repo;
+  - a newer release of the project itself (`pip download`, `npm view`/`npm pack`, `go get ...@latest`);
+  - the reference fix from git history in the image.
+- Not leaks: installing tools (linters, formatters, test runners), dependency downloads, `git clone /app` (a local
+  copy), URLs the agent writes into code or docs, and Go import paths.
+- In a task whose agent should be offline, any successful outbound request means the fix is not active. Stop, and
+  check the client environment against the dir's `client_requirements.txt`.
+- For each leak, check whether the sample passed and whether it used what it fetched. Report every leak to the
+  user in chat: sample id, epoch, what was fetched, the score, and the score with leaked samples counted as
+  failures. The user decides whether and how the README reports it.
+
+## 12. Reflection procedure (mandatory)
+
+Run it when you finish an eval of a model (final run done, README filled) or any other meaningful piece of work: a
+new task, an infrastructure problem solved, an upstream fix, a move to a new host or tool version. Do it before you
+report back to the user. These notes are the knowledge base every later agent starts from, on any server, so each
+lesson you skip will be paid for again.
+
+1. **Collect.** List what went wrong or cost time, what surprised you, what you had to find out by experiment, and
+   what you would do differently. Include what the user corrected or decided along the way.
+2. **Keep what generalizes:** anything that would help another agent with another model on another server. Drop
+   one-off noise.
+3. **Write it where the next agent reads it:**
+   - rules, eval protocol, scoring, Inspect / vLLM / Harbor behaviour, leaks and audits: this file (section 9 for
+     gotchas, 10 for conventions, 11 for leaks, or a new section);
+   - serving, caches, Docker, images, client environments: `local_env_notes.md`;
+   - one task's upstream defects: that task's README, under Patches;
+   - facts about this machine only: `local_env_notes.local.md`, which is not shared.
+4. **Write it general.** Leave out paths, user names, venv locations, hostnames and other tenants. Name the tool,
+   version and symptom, and give cause and fix with numbers where you have them, so others recognize the problem.
+5. **Build on what is there.** Update or correct an existing note rather than adding a near-duplicate, and delete
+   notes that turned out wrong. Keep READMEs to results (section 3): the lessons go in the notes, not the README.
+6. **Report.** Tell the user in chat which notes you added or changed; committing them is their job.
+
+The internet-access and cheating findings of section 11 show why. They were first recorded only in a few task READMEs,
+so later runs of the same tasks on another host copied an older dir and ran without the fixes.

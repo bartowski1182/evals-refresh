@@ -39,11 +39,11 @@ context. The model card reports only GSM8K, so there is no card number to compar
 ### Setup (once per host)
 
 `local_orchestrator.sh` runs `serve.sh` in the official vLLM ROCm image under rootless podman (it needs read-write
-access to `/dev/kfd` and `/dev/dri/renderD*`) and the Inspect client from the virtualenv `~/.venvs/inspect`; create
-them as below (edit the image and paths in `local_orchestrator.sh` if you run vLLM differently, e.g. from vLLM's
-ROCm wheels on a host with glibc >= 2.39). `server_requirements.txt` is the `pip freeze` of that image;
-`client_requirements.txt` is the exact `pip freeze` of the client environment that produced the results below,
-the same packages as the base model's client environment.
+access to `/dev/kfd` and `/dev/dri/renderD*`) and the Inspect client from a virtualenv; create them as below, and edit
+the image and paths in `local_orchestrator.sh` if you keep the virtualenv elsewhere or run vLLM differently (e.g. from
+vLLM's ROCm wheels on a host with glibc >= 2.39). `server_requirements.txt` is the `pip freeze` of that image;
+`client_requirements.txt` is the exact `pip freeze` of the client environment that produced the results below, the
+same packages as the base model's client environment.
 
 ```bash
 # server: vLLM 0.31.0 for ROCm 7.2, from the official image pinned by digest

@@ -31,11 +31,11 @@ parsed by vLLM's tool parser; the model reasons before every call. avg@3 as usua
 
 ### Setup (once per host)
 
-`local_orchestrator.sh` activates two virtualenvs, `~/.venvs/vllm` for the server and `~/.venvs/inspect` for the
-Inspect client; create them as below (edit the paths in `local_orchestrator.sh` if you keep them elsewhere).
-`server_requirements.txt` and `client_requirements.txt` are the exact `pip freeze` of the environments that
-produced the results below (Python 3.12, host details in their headers): installing from them reproduces those
-environments; the commented alternative gives an equivalent fresh install with the same pinned versions.
+Create a server and a client environment as below. The commands use the paths that `local_orchestrator.sh` activates;
+if you keep the environments elsewhere, change the paths there. `server_requirements.txt` and
+`client_requirements.txt` are the exact `pip freeze` of the environments that produced the results below (Python 3.12,
+host details in their headers): installing from them reproduces those environments; the commented alternative gives an
+equivalent fresh install with the same pinned versions.
 
 ```bash
 # server: vLLM 0.29.0 (CUDA 13 wheels; add the matching https://download.pytorch.org/whl/<cuXXX> index if pip cannot resolve torch)

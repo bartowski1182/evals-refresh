@@ -46,10 +46,11 @@ OpenHands, Claude Code, ...) and are not directly comparable; neither model card
 ### Setup (once per host)
 
 `local_orchestrator.sh` runs `serve.sh` in the official vLLM ROCm image under rootless podman (it needs read-write
-access to `/dev/kfd` and `/dev/dri/renderD*`), the Inspect client from the virtualenv `~/.venvs/inspect-swe`, and the
-sandboxes on a rootless Docker daemon. `server_requirements.txt` is the `pip freeze` of that image;
-`client_requirements.txt` is the exact `pip freeze` of the client environment that produced the results below, the
-same packages as the base model's SWE-bench client environment.
+access to `/dev/kfd` and `/dev/dri/renderD*`), the Inspect client from a virtualenv you create as below (at the path
+the orchestrator activates, or edit it there), and the sandboxes on a rootless Docker daemon.
+`server_requirements.txt` is the `pip freeze` of that image; `client_requirements.txt` is the exact `pip freeze` of
+the client environment that produced the results below, the same packages as the base model's SWE-bench client
+environment.
 
 ```bash
 # server: vLLM 0.31.0 for ROCm 7.2, from the official image pinned by digest

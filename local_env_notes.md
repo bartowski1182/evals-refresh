@@ -27,6 +27,12 @@ Keep them in `local_env_notes.local.md` next to this file, which git ignores, an
 - `amd-smi` can number GPUs differently from HIP (`HIP_VISIBLE_DEVICES`). Once, with HIP devices 0 and 1 free,
   `amd-smi` showed GPUs 0 and 3 idle. Find the free HIP devices from the `HIP_VISIBLE_DEVICES` of the running servers
   (e.g. `podman inspect` on their containers), not from the `amd-smi` index.
+- Multi-turn agent tasks need every turn of a sample on one prefix cache. When one large-TP replica is not possible
+  (see TP>1 under AMD below), split the tasks into shards (`-T dataset_task_names=[...]`) and serve each shard from its
+  own DP=1 server (own `PORT` and `LOG_DIR`). DeepSWE (~120k-token histories) on DP=4 behind one port cached each
+  history on several replicas, which caused evictions: model calls took ~85 s and 40% of samples hit the 14400 s time
+  limit. Sharded, it got ~97% prefix-cache hits and ~20 s per call at 4-7 samples per GPU. Terminal-Bench 2.1 (shorter
+  histories, tool-bound) did not need this.
 
 ## Serving on AMD (ROCm)
 
@@ -39,13 +45,28 @@ Keep them in `local_env_notes.local.md` next to this file, which git ignores, an
     CPU, which exhausts podman's default of 2048 tasks per container.
   - Publish only the server port (no `--network host`), so two servers on disjoint GPUs cannot clash on vLLM's
     internal ports. Publish it on `127.0.0.1`, because `localhost` resolves to `::1` first.
+  - Pass `--init`: vLLM as PID 1 ignores SIGTERM, so `podman stop` cannot stop it gracefully.
+  - With SELinux enforcing, pass `--security-opt label=disable`; otherwise the container cannot list the directories
+    of the bind-mounted HF cache.
+  - Mount a host directory on the container's `/root/.cache/vllm` to keep the torch.compile cache: the first start of
+    a new config compiles for about 10 min, past the default `VLLM_ENGINE_READY_TIMEOUT_S` of 600 s (raise it, e.g. to
+    1800), and a warm start takes 3-4 min.
+  - TP>1 can fail in rootless containers: RCCL's P2P transport fails with `hipIpcGetMemHandle failed`, even with
+    `--cap-add SYS_PTRACE`. Scale out with DP instead.
+- NUMA auto-balancing (`kernel.numa_balancing=1`; AMD's ROCm tuning guides say to disable it) stalls vLLM start-up for
+  10+ minutes on a multi-socket host: tiny host-to-GPU copies take minutes, with threads stuck in mmap. Without root,
+  start the container under `numactl --interleave=all`; the kernel does not balance processes that have an explicit
+  memory policy, and the container's processes inherit it.
+- Copying memory-mapped safetensors to the GPU can cost about 1 s per tensor whatever its size (about 330 s for an
+  18 GB checkpoint). `--safetensors-load-strategy eager` reads the files into RAM first and loads in about 5 s.
 - Attention backend (vLLM 0.31.0, Qwen3.8 hybrid attention): the ROCm default `ROCM_ATTN` decodes at about 5 tok/s per
   stream at 100k context, which pushes long reasoning traces past Inspect's 7200 s `client_timeout` (the request is
   retried from scratch). `--attention-backend TRITON_ATTN` does about 77 tok/s there. `ROCM_AITER_UNIFIED_ATTN` is faster
   still (about 115) but produced garbage for `RedHatAI/Qwen3.8-27B-MXFP4` with `--kv-cache-dtype bfloat16` (correct with
   its FP8 KV and for the AMD checkpoint); `ROCM_AITER_FA` stalls at 16 concurrent streams. `VLLM_ROCM_USE_AITER=1` adds
   2-7% and swaps more kernels; not used. Throughput benchmarks with random prompts do not see broken outputs: check
-  greedy generations before adopting a kernel setting.
+  greedy generations before adopting a kernel setting. With `TRITON_ATTN`, vLLM 0.31.0 decodes the 27B MXFP4 6-22%
+  faster than 0.29.0 on one MI355X.
 
 ## Docker for sandboxed and agentic tasks
 
@@ -60,7 +81,9 @@ Keep them in `local_env_notes.local.md` next to this file, which git ignores, an
   - Install the static Docker binaries with the rootless extras and `slirp4netns`, and the compose plugin (v2 or
     later) in `~/.docker/cli-plugins`. Then run
     `DOCKERD_ROOTLESS_ROOTLESSKIT_NET=slirp4netns dockerd-rootless-setuptool.sh install --force`, which installs a
-    systemd user unit. `loginctl enable-linger $USER` keeps the daemon running after you log out.
+    systemd user unit. `loginctl enable-linger $USER` keeps the daemon running after you log out. Without lingering,
+    the daemon and rootless podman containers stop when your last login session ends; run long evals from a session
+    that stays open (e.g. tmux).
   - The setup tool refuses to install while a rootful daemon is reachable. In that case, or without lingering, start
     the daemon by hand in a delegated systemd user scope; otherwise runc cannot create container cgroups:
     `XDG_RUNTIME_DIR=/run/user/$(id -u) nohup systemd-run --user --scope -p Delegate=yes --unit=docker-rootless dockerd-rootless.sh > <log> 2>&1 &`.
@@ -74,7 +97,8 @@ Keep them in `local_env_notes.local.md` next to this file, which git ignores, an
     - Give the default runc runtime `NoNewKeyring`: define a runtime (e.g. `runc-nokeyring`) with
       `"runtimeType": "io.containerd.runc.v2"` and `"options": {"NoNewKeyring": true}`, and make it `default-runtime`.
       Otherwise each container takes a kernel keyring, and the kernel allows 200 keys per user.
-  - Delegate the cpu, memory and pids cgroup controllers to the user so container limits work.
+  - Delegate the cpu, memory and pids cgroup controllers to the user so container limits work. Without the cpu
+    controller, Docker rejects CPU limits ("NanoCPUs can not be set"), hence Harbor's `-T override_cpus=0`.
   - `local_orchestrator.sh` exports `DOCKER_HOST=unix:///run/user/$UID/docker.sock` and puts the rootless binaries
     first in `PATH`.
   - The daemon's default `bridge` network gets the first /24 of the address pools (about 250 addresses). The forked
@@ -122,11 +146,28 @@ Keep them in `local_env_notes.local.md` next to this file, which git ignores, an
   take each `hb__<environment hash>` name from the task's own sandbox config.
 - The DeepSWE task images come from ECR public, which throttles bursts; pull them one at a time.
 
-## Client venvs beyond the three in `AGENTS.md`
+## Running long evals
 
-- `~/.venvs/inspect-swebench` (inspect-ai 0.3.263, inspect-evals 0.20.0, swebench 4.1.0) for the SWE-bench Verified
-  dirs that pin those versions.
-- `~/.venvs/inspect-harbor-fix` for the DeepSWE and SWE-bench Pro dirs that need the
-  `eldarkurtic/inspect_harbor@fix/enforce-agent-network-mode` fork. Install the fork by commit with
-  `uv pip install --no-deps "inspect_harbor @ git+...@<commit>"`: its pyproject's uv `exclude-newer = "7 days"` breaks
-  a resolving install, and a local-directory install records no commit in `pip freeze`.
+- Launch long runs with `setsid nohup ...` so they survive a Claude Code restart or a dropped SSH session (but see
+  lingering above).
+- `inspect eval-retry <log>` resumes an interrupted eval. It first writes a `-recovered.eval` copy of the log; the new
+  log it writes carries all samples (finished ones kept, unfinished and errored ones rerun).
+- A running eval can be retuned live: `inspect ctl config <task_id> --max-samples N --max-sandboxes N --key docker N
+  --key vllm/<model> N` (each shard is its own process).
+
+## Client environments beyond the three in `AGENTS.md`
+
+Environments are local to each user and server: create them from the task dir's `client_requirements.txt` (its README
+Setup gives the commands), name and place them as you like, and point `local_orchestrator.sh` at them.
+
+- SWE-bench Verified dirs that pin inspect-ai 0.3.263, inspect-evals 0.20.0 and swebench 4.1.0 need an environment of
+  their own: inspect_evals' scorer breaks under swebench 5 (see those READMEs' Patches).
+- DeepSWE and SWE-bench Pro dirs that run the `eldarkurtic/inspect_harbor@fix/enforce-agent-network-mode` fork
+  (AGENTS.md section 11) need an environment of their own. Install the fork by commit with
+  `uv pip install --no-deps "inspect_harbor @ git+https://github.com/eldarkurtic/inspect_harbor@<commit>"`: its
+  pyproject's uv `exclude-newer = "7 days"` breaks a resolving install, and a local-directory install records no
+  commit in `pip freeze`.
+- The MXFP4 Qwen3.8-27B DeepSWE dirs ran stock inspect-harbor 1.0.0, for its verifier fixes, without the network fix.
+  Don't reuse that setup for new DeepSWE runs.
+- A `client_requirements.txt` that contains litellm next to `openai==3.14.0` installs only with
+  `pip install --no-deps -r client_requirements.txt`; a resolving install fails on litellm's `openai<3` pin.

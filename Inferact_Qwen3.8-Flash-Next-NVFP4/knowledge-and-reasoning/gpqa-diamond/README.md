@@ -33,10 +33,10 @@ stays BF16. Revision `103a760`. This is the recipe's default variant.
 
 ### Setup (once per host)
 
-`local_orchestrator.sh` activates two virtualenvs, `~/.venvs/vllm-nightly` for the server and `~/.venvs/inspect`
-for the Inspect client; create them as below (edit the paths in `local_orchestrator.sh` if you keep them
-elsewhere). `server_requirements.txt` and `client_requirements.txt` are the exact `pip freeze` of the environments
-that produced the results below (Python 3.12, host details in their headers).
+Create a server and a client environment as below. The commands use the paths that `local_orchestrator.sh` activates;
+if you keep the environments elsewhere, change the paths there. `server_requirements.txt` and
+`client_requirements.txt` are the exact `pip freeze` of the environments that produced the results below (Python 3.12,
+host details in their headers).
 
 ```bash
 # server: vLLM nightly 0.30.1rc1.dev418+g50319916a (the recipe requires a nightly build; CUDA 13 wheels)
