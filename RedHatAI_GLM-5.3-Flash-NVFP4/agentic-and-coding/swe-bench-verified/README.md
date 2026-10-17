@@ -26,8 +26,8 @@ revision `18d55bf`.
   epochs, sampling params, reasoning effort, per-turn max tokens, message/time limits, concurrency).
 - `server_requirements.txt` / `client_requirements.txt` — `uv pip freeze` of the vLLM and Inspect venvs that
   produced the results below, with the host (GPUs, driver, CUDA, Python) in the header.
-- `local_orchestrator.sh` — runs everything in your local dev environment: activates the venvs, sets GPUs (0-7,
-  port 8000), one TP=8 replica (so each sample's prefix cache stays on one replica), the local checkpoint path,
+- `local_orchestrator.sh` — runs everything in your local dev environment: activates the venvs, sets GPUs (0-3,
+  port 8000), one TP=4 replica (so each sample's prefix cache stays on one replica), the local checkpoint path,
   starts `serve.sh` in the background, runs `run_eval.sh`, tears down. **This is the only file you should modify**
   to match the environment you run in.
 
@@ -78,8 +78,40 @@ Always smoke-test first: `./local_orchestrator.sh --limit 2`
 
 ## Results
 
-_Run pending — this section will be filled with the all-samples accuracy (pass@1), stderr, sample errors,
-time-limit hits, truncations, leak-audit result, and token stats once the full 500-instance run completes._
+With model generation config:
+
+`temperature=1.0, top_p=0.95, top_k unset, reasoning_effort=max, max_tokens=65536 (per turn), message_limit=200, max_connections=48, max_sandboxes=48, time_limit=14400s, client_timeout=7200, TP=4 DP=1 with MTP (num_speculative_tokens=5), kv_cache_dtype=fp8, epochs=1`
+
+(`max_connections`/`max_sandboxes` were set to 48, not the dir's default 56, to match the TP=4 KV cache — 12.4M
+tokens, ~47× concurrency at 262k — and keep Docker-disk headroom.)
+
+the following scores and token stats are obtained:
+
+| metric | value |
+|---|---|
+| resolved rate (pass@1, 1 epoch) | **0.772 (386 of 500)** |
+| stderr | 0.019 |
+| samples | 500 (500 instances × 1 epoch) |
+| sample errors | 0 |
+| message-limit hits (200 messages ≈ 100 turns) | 162 (of which 103 still passed on the state they had reached) |
+| time-limit hits (14400 s) | 0 |
+| turns truncated at max_tokens | 0 |
+| samples with network access / that read the reference fix from git history | 0 (audited) |
+
+| tokens / sample | input | output | reasoning |
+|---|---|---|---|
+| mean | 3,729,288 | 50,963 | 42,967 |
+| median | 3,349,973 | 44,554 | 36,467 |
+| max | 12,520,145 | 170,430 | 157,337 |
+
+Input tokens are cumulative over agent turns (history is resent each turn). Assistant turns per sample: median 72,
+mean 68, max 99 (the 200-message limit = ~100 turns is binding for 162 of 500 samples; most of those had already
+produced a candidate patch). Total run time 2:58:12 on 4× B200 (one TP=4 replica, 48 concurrent samples). No solution
+leaks: every instance ran with `network_mode: none` (the task default) — the only outbound attempts were `git clone`s
+that failed with "unable to access" — and the official SWE-bench images carry no commit newer than the instance's
+base commit (7 images spot-checked across the astropy/django/matplotlib/scikit-learn/sympy/pytest/sphinx families,
+0 non-ancestor refs each), so the agents' frequent `git log --all` / `git log --grep` searches for the fix returned
+nothing usable.
 
 ## Patches for upstream
 
