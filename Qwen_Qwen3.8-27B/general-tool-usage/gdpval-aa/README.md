@@ -8,58 +8,71 @@
 | vLLM recipe | https://recipes.vllm.ai/Qwen/Qwen3.8-27B |
 | Task source | https://huggingface.co/datasets/openai/gdpval |
 
-**Protocol note.** The Qwen model card does not report GDPval. Artificial Analysis's GDPval-AA runs these 220 tasks with its own agent (shell and web
-browsing) and reports an Elo from blind pairwise LLM-judge comparisons between models, which cannot be reproduced
-for a single model. `inspect_evals/gdpval` produces the deliverables with Inspect's default tool loop (`bash`,
-`python`, 180 s tool timeout, no code-interpreter or search API) and records the final message; it has no grader
-of its own. Scoring is a separate phase, described under Results. 98 of the 220 tasks have no input files; the
-others come with spreadsheets, PDFs and Word documents, and 25 include images, audio or video that a text-only
-model can only inspect through tools. One epoch (pass@1) instead of the repo's usual avg@3. All in-flight samples
-share one vLLM server (one TP=8 replica so the prefix cache stays local). The numbers are therefore not comparable
-to the GDPval-AA leaderboard or to OpenAI's GDPval leaderboard.
+**Protocol note.** No model card reports GDPval. Artificial Analysis's GDPval-AA runs these 220 tasks with its own
+agent (shell and web browsing) and reports an Elo from blind pairwise LLM-judge comparisons between models, which
+cannot be reproduced for a single model. `inspect_evals/gdpval` produces the deliverables with Inspect's default tool
+loop (`bash`, `python`, 180 s tool timeout, no code-interpreter or search API) and records the final message; it has
+no grader of its own. Scoring is a separate phase, to be planned with a local judge identical across the three models
+(AGENTS.md, section 8) and described under Results. One epoch (pass@1); one TP=8 replica so the prefix cache stays
+local. This dir is one of the three identical copies of the task that make up the Qwen3.8-27B comparison set (`Qwen_Qwen3.8-27B`, `RedHatAI_Qwen3.8-27B-MXFP4`, `RedHatAI_Qwen3.8-27B-MXFP4xFP8`): same task, agent, prompt, sampling, limits, concurrency, epochs (one, pass@1), vLLM release and serving topology, so the three numbers are like for like; only the checkpoint differs. The numbers are not comparable to the GDPval-AA leaderboard or to OpenAI's GDPval leaderboard.
+
+**Checkpoint.** `Qwen/Qwen3.8-27B` is the BF16 base model of the comparison set, the reference the two RedHatAI
+quantized checkpoints are measured against. The KV cache is BF16 (`--kv-cache-dtype bfloat16`, this checkpoint's
+default, spelled out so that the three `serve.sh` are identical), and vLLM 0.32.0 is used for the three dirs (see
+Setup). Record the checkpoint revision here before the run.
 
 ## Files
 
 - `serve.sh` — deploys the model with a vLLM server. vLLM-serve arguments live here
-  (parallelism, context length, reasoning/tool parsers), taken from the official recipe.
+  (parallelism, context length, reasoning/tool parsers), taken from the Qwen/Qwen3.8-27B recipe, plus the BF16 KV cache; identical in the three dirs apart from
+  `MODEL`.
 - `run_eval.sh` — runs the Inspect task against that server. Inspect-side params live here
-  (task, epochs, sampling params, per-turn max tokens, message and time limits, concurrency, sandbox count).
-- `server_requirements.txt` / `client_requirements.txt` — `pip freeze` of the vLLM and Inspect
-  venvs that produced the results below.
-- `local_orchestrator.sh` — runs everything in your local dev environment: activates the
-  venvs, sets GPUs and TP/DP, points Docker at the rootless daemon, starts `serve.sh` in the background,
-  runs `run_eval.sh`, tears down. **This is the only file you should modify** to match the
-  environment you run in.
+  (task, epochs, sampling params, per-turn max tokens, message and time limits, concurrency, sandbox count); identical in the three dirs apart from `MODEL`.
+- `server_requirements.txt` / `client_requirements.txt` — `pip freeze` inside the vLLM image and of the Inspect venv
+  that produce the results, with the host (GPUs, driver, CUDA, Python) in the header. Written after the final run; not present yet.
+- `local_orchestrator.sh` — runs everything in your local dev environment: starts `serve.sh` inside the vLLM podman image (GPUs 0-7, port 8000, one TP=8 replica, the HF cache and the task dir mounted), points Docker at the rootless daemon, waits for the server, activates the client venv, runs `run_eval.sh`, stops the container.
+  **This is the only file you should modify** to match the environment you run in.
 
 ## Run
 
 ### Setup (once per host)
 
-Create a server and a client environment as below. The commands use the paths that `local_orchestrator.sh` activates;
-if you keep the environments elsewhere, change the paths there. `server_requirements.txt` and
-`client_requirements.txt` are the exact `pip freeze` of the environments that produced the results below (Python 3.12,
-host details in their headers): installing from them reproduces those environments; the commented alternative gives an
-equivalent fresh install with the same pinned versions.
+Pull the server image and create the client environment as below. The commands use the image reference and the venv
+path that `local_orchestrator.sh` uses; if you keep them elsewhere, change them there. Once the results are in,
+`server_requirements.txt` (`pip freeze` inside the image) and `client_requirements.txt` hold the exact packages that
+produced them (host details in their headers); create the client environment from its file instead. Use the same image
+and client environments for the three dirs of the comparison set.
 
 ```bash
-# server: vLLM 0.29.0 (CUDA 13 wheels; add the matching https://download.pytorch.org/whl/<cuXXX> index if pip cannot resolve torch)
-python3.12 -m venv ~/.venvs/vllm && source ~/.venvs/vllm/bin/activate
-pip install -r server_requirements.txt          # or: pip install vllm==0.29.0
-# client: Inspect
+# server: the vLLM 0.32.0 podman image, docker.io/vllm/vllm-openai:v0.32.0 pinned by digest (IMAGE in
+# local_orchestrator.sh), the same image for the three dirs. 0.32.0 is the first release with the dense MXFP4-weight /
+# FP8-activation scheme the MXFP4xFP8 checkpoint needs; the humming-kernels dependency of its CUDA wheels provides the
+# only MXFP4 GEMM of that release that takes FP8 activations (CUDA, SM75+), so the comparison set needs an NVIDIA host.
+# GPU access from the container goes through the NVIDIA Container Toolkit's CDI spec (generated once per host, as root).
+podman pull docker.io/vllm/vllm-openai:v0.32.0@sha256:befccf0e7e4089aa23926bb6f887a85c0d46c2a99e6de5c5ffdf5cb7957c5b34
+sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+# client: Inspect + inspect_evals with the gdpval extra
 python3.12 -m venv ~/.venvs/inspect && source ~/.venvs/inspect/bin/activate
-pip install -r client_requirements.txt          # or:
-# pip install "inspect-evals[gdpval]==0.20.0" openai
+pip install "inspect-ai==0.3.263" "inspect-evals[gdpval]==0.20.0" "openai==3.14.0"
 ```
 
-Model weights and datasets are fetched from the Hugging Face Hub on first use into the usual cache (`HF_HOME`
-if set). Export `HF_TOKEN` in your shell before running (never in the repo); nothing here is gated, but anonymous Hub
-downloads are rate-limited.
+Check `logs/serve.log` at start-up: `max_model_len` 262144, KV cache dtype `bfloat16`, and the default sampling
+params vLLM takes from the checkpoint's `generation_config.json` (temperature 1.0, top_p 0.95, top_k 20).
 
-Docker (with the compose plugin) must be reachable by your user. `local_orchestrator.sh` exports `DOCKER_HOST` for
-a rootless daemon (`unix:///run/user/<uid>/docker.sock`, image store under `~/.local/share/docker`); with a
-rootful daemon drop that export. Check the image-store disk space quoted below before the first run. Rootless
-Docker needs a runc runtime with `NoNewKeyring` in `daemon.json` (one kernel key per container otherwise
-exhausts a user's quota of 200) and cannot apply CPU limits, hence `-T override_cpus=0` in `run_eval.sh`.
+Docker with the compose plugin (v2.x or later) is required for the sandboxes (podman serves the model only).
+`local_orchestrator.sh` exports `DOCKER_HOST` for a rootless daemon (`unix:///run/user/<uid>/docker.sock`); with a
+rootful daemon drop that export. Rootless Docker needs
+a runc runtime with `NoNewKeyring` in `daemon.json` (one kernel key per container otherwise exhausts a user's quota of
+200) and cannot apply CPU limits, hence `-T override_cpus=0` in `run_eval.sh`. Check the image-store disk space before
+the first run (see `local_env_notes.md`).
+
+Build the sandbox image once before the first run (`docker build -t gdpval -f <site-packages>/inspect_evals/gdpval/Dockerfile <that dir>`,
+about 10 minutes); Inspect rebuilds it from the same Dockerfile with cached layers. Each run writes the consolidated
+deliverables (one folder per task plus a parquet table) to
+`<site-packages>/inspect_evals/gdpval/gdpval_hf_upload/<timestamp>_gdpval/`, the layout OpenAI's grader expects.
+`local_orchestrator.sh` serves the checkpoint from the Hugging Face Hub (`MODEL`) through the host's HF cache (`HF_HOME`,
+mounted into the container): download it there once with `hf download` and export `HF_HUB_OFFLINE=1`, or set
+`MODEL_PATH` there to serve a local copy instead. Export `HF_TOKEN` in your shell before running (never in the repo); nothing here is gated, but anonymous Hub downloads are rate-limited.
 
 ### Run the eval
 
@@ -70,44 +83,26 @@ inspect view --log-dir ./logs
 
 Always smoke-test first: `EPOCHS=1 ./local_orchestrator.sh --limit 2`
 
-Requires Docker. Build the sandbox image once before
-the first run (`docker build -t gdpval -f <site-packages>/inspect_evals/gdpval/Dockerfile <that dir>`, about
-10 minutes); Inspect rebuilds it from the same Dockerfile with cached layers. Each run writes the consolidated
-deliverables (one folder per task plus a parquet table) to `<site-packages>/inspect_evals/gdpval/gdpval_hf_upload/<timestamp>_gdpval/`,
-the layout OpenAI's grader expects.
-
 ## Results
 
-Generation phase, with model generation config:
+Not run yet. `run_eval.sh` records the configuration below; fill the tables from the final `.eval` log (AGENTS.md,
+section 5), with sample errors counted as failures.
 
-`temperature=1.0, top_p=0.95, top_k=20, reasoning_effort=xhigh, max_tokens=65536 (per turn), message_limit=200, time_limit=7200s, client_timeout=7200, tool_timeout=180s, TP=8 DP=1, epochs=1; 220 tasks in one run at 56 samples in flight`
+With model generation config:
 
-the following run stats are obtained (scores are in the scoring phase below):
+`temperature=1.0, top_p=0.95, top_k=20, reasoning_effort=xhigh, max_tokens=65536 (per turn), message_limit=200, time_limit=7200s, client_timeout=7200, tool_timeout=180s, kv_cache_dtype=bfloat16, TP=8 DP=1, epochs=1, 56 samples in flight`
+
+the following scores and token stats are obtained:
 
 | metric | value |
 |---|---|
-| samples | 220 of 220 tasks, 1 epoch |
-| samples that wrote at least one deliverable file | 192 (the others answered in the final message only, which the task allows) |
-| deliverable files per sample | median 2, max 86 |
-| time-limit hits (7200 s) | 17 |
-| message-limit hits (200) | 4 |
-| turns truncated at max_tokens | 4 |
-| context compactions | 0 |
-| sample errors | 0 |
+| | |
 
 | tokens / sample | input | output | reasoning |
 |---|---|---|---|
-| mean | 1,608,388 | 59,015 | 36,470 |
-| median | 818,256 | 53,544 | 33,164 |
-| max | 10,114,146 | 172,012 | 93,416 |
+| | | | |
 
-Input tokens are cumulative over agent turns (history is resent each turn). Agent turns per
-sample: median 21, mean 29, max 99. Wall time per sample: median 2,983 s,
-mean 3,407 s, max 7,201 s. Total run time 4 h 16 min on 8x H100.
-
-Samples with a deliverable file / tasks per sector: Health Care and Social Assistance 23/25, Government 25/25, Professional, Scientific, and Technical Services 23/25, Real Estate and Rental and Leasing 23/25, Manufacturing 21/25, Finance and Insurance 20/25, Wholesale Trade 24/25, Information 16/25, Retail Trade 17/20.
-
-Scoring phase: pending.
+Scoring phase: not planned yet.
 
 ## Patches for upstream
 

@@ -1,28 +1,30 @@
 #!/usr/bin/env bash
 # Serve RedHatAI/Qwen3.8-27B-MXFP4 with vLLM.
-# Flags follow the official vLLM recipe of the base model: https://recipes.vllm.ai/Qwen/Qwen3.8-27B
-# (the recipe has no MXFP4 variant; the model card's serving command adds nothing beyond it). The W4A4 MXFP4
-# scheme is read from the checkpoint's quantization_config (compressed-tensors).
-# Not from the recipe: --safetensors-load-strategy eager reads the checkpoint into RAM before copying it to the GPU.
-# On this ROCm host every copy from the default memory-mapped file costs ~1 s regardless of size (~330 s per load);
-# it only changes how weights are read, not what is computed.
-# Not from the recipe: --attention-backend TRITON_ATTN. vLLM's ROCm default (ROCM_ATTN) decodes a single sequence at
-# 64k context at ~8 tok/s here, TRITON_ATTN at ~90 tok/s (and +50% batched); same math, different kernel.
-# --kv-cache-dtype bfloat16 overrides the checkpoint's FP8 KV-cache scheme (vLLM applies it under "auto"), so that the
-# KV cache is bf16 as for amd/Qwen3.8-27B-Quark-AWQ-MXFP4 and the comparison isolates the MXFP4 weights/activations.
+# Flags follow the official vLLM recipe of Qwen/Qwen3.8-27B: https://recipes.vllm.ai/Qwen/Qwen3.8-27B
+# The recipe's MXFP4 variant serves this checkpoint with the base flags; vLLM reads the quantization scheme from the
+# checkpoint's config.json (compressed-tensors: MXFP4 weights and MXFP4 activations, W4A4). The checkpoint also declares
+# an FP8 KV-cache scheme that vLLM applies under --kv-cache-dtype auto; bfloat16 below overrides it (see the KV-cache
+# comment). Check the start-up line "Using <Kernel> for MXFP4 GEMM" and record the kernel with the results.
+# Identical in the three dirs of the Qwen3.8-27B comparison set (Qwen/Qwen3.8-27B, RedHatAI/Qwen3.8-27B-MXFP4,
+# RedHatAI/Qwen3.8-27B-MXFP4xFP8) apart from MODEL: same vLLM release, topology, context, parsers, thinking default and
+# KV-cache dtype, so the three runs differ only in the linear layers' quantization.
+# --kv-cache-dtype bfloat16: the default for the BF16 base model, spelled out because the MXFP4 checkpoint declares an
+# FP8 KV-cache scheme that vLLM would apply under "auto" (the MXFP4xFP8 checkpoint may too).
+# TP=2 x DP=4: four replicas on 8 GPUs, the smallest topology that holds the BF16 model with its full 262k context on
+# 80 GB GPUs; kept for the quantized checkpoints so that the three are served alike. The multi-turn tasks export
+# TP=8 DP=1 (one replica, one prefix cache) in local_orchestrator.sh.
 set -euo pipefail
 
 MODEL="${MODEL:-RedHatAI/Qwen3.8-27B-MXFP4}"
+MODEL_PATH="${MODEL_PATH:-$MODEL}"   # HF id, or a local copy of the checkpoint
 PORT="${PORT:-8000}"
-TP="${TP:-1}"   # 27B MXFP4 (19 GB on disk) fits one GPU with room for the full 262k context
-DP="${DP:-8}"   # 8 replicas behind one endpoint -> all 8 GPUs
+TP="${TP:-2}"
+DP="${DP:-4}"
 
-exec vllm serve "$MODEL" \
+exec vllm serve "$MODEL_PATH" \
   --tensor-parallel-size "$TP" \
   --data-parallel-size "$DP" \
   --max-model-len 262144 \
-  --safetensors-load-strategy eager \
-  --attention-backend TRITON_ATTN \
   --kv-cache-dtype bfloat16 \
   --reasoning-parser qwen3 \
   --default-chat-template-kwargs '{"enable_thinking": true, "reasoning_effort": "xhigh"}' \

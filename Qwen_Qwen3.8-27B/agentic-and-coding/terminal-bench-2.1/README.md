@@ -4,65 +4,77 @@
 |---|---|
 | Task | `inspect_harbor/terminal_bench_2_1` (89 tasks, Harbor hub package `terminal-bench/terminal-bench-2-1` pinned to digest `sha256:7d7bdc1c…`) |
 | Category | agentic-and-coding (subclass: swe-agent) |
-| Exec tier | `agent` — one prebuilt Docker container per task, bash/python tools, hidden verifier |
+| Exec tier | `agent` — one prebuilt Docker container per task (Docker Hub), bash/python tools, hidden verifier |
 | vLLM recipe | https://recipes.vllm.ai/Qwen/Qwen3.8-27B |
 | Task source | https://hub.harborframework.com/datasets/terminal-bench/terminal-bench-2-1 |
 
-**Protocol note.** The model card reports 73.0 for "Terminal Bench 2.1 (Terminus)", i.e. with the Terminus 2 agent used by the official leaderboard. `inspect_harbor` solves every task with Inspect's generic ReAct agent
-(`bash`, `python`, `update_plan`, `submit`; 300 s tool timeout; automatic context compaction), not
-Terminus 2. Harbor's per-task agent timeouts (600 s to 12000 s, 48 of 89 tasks at 900 s) are not
-applied by `inspect_harbor`; a single `--time-limit 7200` is used for every task instead. Containers run
-without Harbor's per-task CPU cap (`override_cpus=0`, see `run_eval.sh`) and with `inspect_harbor`'s 6 GB
-memory floor. All 267 samples share one vLLM server, so the wall-clock limit binds harder than it would
-against an API endpoint: per-sample generation speed drops with the number of samples in flight. The two
-numbers are therefore not directly comparable.
+**Protocol note.** The base model card reports "Terminal Bench 2.1 (Terminus)", i.e. with the Terminus 2 agent used by
+the official leaderboard. `inspect_harbor` solves every task with Inspect's generic ReAct agent (`bash`, `python`,
+`update_plan`, `submit`; 300 s tool timeout; automatic context compaction), not Terminus 2. Harbor's per-task agent
+timeouts (600 s to 12000 s, most 900 s) are not applied; a single `--time-limit 7200` is used for every task.
+Containers run without Harbor's per-task CPU cap (`override_cpus=0`) and with `inspect_harbor`'s 6 GB memory floor;
+the tasks have public network by design. One epoch (pass@1), 89 samples in flight (all tasks at once). The wall-clock
+limit binds harder against a shared server than against an API endpoint, so the number is not comparable to the
+leaderboard. This dir is one of the three identical copies of the task that make up the Qwen3.8-27B comparison set (`Qwen_Qwen3.8-27B`, `RedHatAI_Qwen3.8-27B-MXFP4`, `RedHatAI_Qwen3.8-27B-MXFP4xFP8`): same task, agent, prompt, sampling, limits, concurrency, epochs (one, pass@1), vLLM release and serving topology, so the three numbers are like for like; only the checkpoint differs.
+
+**Checkpoint.** `Qwen/Qwen3.8-27B` is the BF16 base model of the comparison set, the reference the two RedHatAI
+quantized checkpoints are measured against. The KV cache is BF16 (`--kv-cache-dtype bfloat16`, this checkpoint's
+default, spelled out so that the three `serve.sh` are identical), and vLLM 0.32.0 is used for the three dirs (see
+Setup). Record the checkpoint revision here before the run.
 
 ## Files
 
 - `serve.sh` — deploys the model with a vLLM server. vLLM-serve arguments live here
-  (parallelism, context length, reasoning/tool parsers), taken from the official recipe.
+  (parallelism, context length, reasoning/tool parsers), taken from the Qwen/Qwen3.8-27B recipe, plus the BF16 KV cache; identical in the three dirs apart from
+  `MODEL`.
 - `run_eval.sh` — runs the Inspect task against that server. Inspect-side params live here
-  (task and package digest, epochs, sampling params, per-turn max tokens, concurrency, sandbox count, time limit).
-- `server_requirements.txt` / `client_requirements.txt` — `pip freeze` of the vLLM and Inspect
-  venvs that produced the results below. The client venv is the `inspect-harbor` one (see Run).
-- `local_orchestrator.sh` — runs everything in your local dev environment: activates the
-  venvs, sets GPUs, points Docker at the rootless daemon, starts `serve.sh` in the background,
-  runs `run_eval.sh`, tears down. **This is the only file you should modify** to match the
-  environment you run in.
+  (task and package digest, epochs, sampling params, reasoning effort, per-turn max tokens, concurrency, sandbox count, time limit); identical in the three dirs apart from `MODEL`.
+- `server_requirements.txt` / `client_requirements.txt` — `pip freeze` inside the vLLM image and of the Inspect venv
+  that produce the results, with the host (GPUs, driver, CUDA, Python) in the header. Written after the final run; not present yet.
+- `local_orchestrator.sh` — runs everything in your local dev environment: starts `serve.sh` inside the vLLM podman image (GPUs 0-7, port 8000, TP=2 x DP=4 from `serve.sh`, the HF cache and the task dir mounted), points Docker at the rootless daemon, waits for the server, activates the client venv, runs `run_eval.sh`, stops the container.
+  **This is the only file you should modify** to match the environment you run in.
 
 ## Run
 
 ### Setup (once per host)
 
-Create a server and a client environment as below. The commands use the paths that `local_orchestrator.sh` activates;
-if you keep the environments elsewhere, change the paths there. `server_requirements.txt` and `client_requirements.txt`
-are the exact `pip freeze` of the environments that produced the results below (Python 3.12, host details in their
-headers): installing from them reproduces those environments; the commented alternative gives an equivalent fresh
-install with the same pinned versions.
+Pull the server image and create the client environment as below. The commands use the image reference and the venv
+path that `local_orchestrator.sh` uses; if you keep them elsewhere, change them there. Once the results are in,
+`server_requirements.txt` (`pip freeze` inside the image) and `client_requirements.txt` hold the exact packages that
+produced them (host details in their headers); create the client environment from its file instead. Use the same image
+and client environments for the three dirs of the comparison set.
 
 ```bash
-# server: vLLM 0.29.0 (CUDA 13 wheels; add the matching https://download.pytorch.org/whl/<cuXXX> index if pip cannot resolve torch)
-python3.12 -m venv ~/.venvs/vllm && source ~/.venvs/vllm/bin/activate
-pip install -r server_requirements.txt          # or: pip install vllm==0.29.0
-# client: Inspect
+# server: the vLLM 0.32.0 podman image, docker.io/vllm/vllm-openai:v0.32.0 pinned by digest (IMAGE in
+# local_orchestrator.sh), the same image for the three dirs. 0.32.0 is the first release with the dense MXFP4-weight /
+# FP8-activation scheme the MXFP4xFP8 checkpoint needs; the humming-kernels dependency of its CUDA wheels provides the
+# only MXFP4 GEMM of that release that takes FP8 activations (CUDA, SM75+), so the comparison set needs an NVIDIA host.
+# GPU access from the container goes through the NVIDIA Container Toolkit's CDI spec (generated once per host, as root).
+podman pull docker.io/vllm/vllm-openai:v0.32.0@sha256:befccf0e7e4089aa23926bb6f887a85c0d46c2a99e6de5c5ffdf5cb7957c5b34
+sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+# client: Inspect + inspect_harbor
 python3.12 -m venv ~/.venvs/inspect-harbor && source ~/.venvs/inspect-harbor/bin/activate
-pip install -r client_requirements.txt          # or:
-# pip install "inspect-harbor==0.7.5" httpx2 "openai==3.14.0"
+pip install "inspect-harbor==1.0.0" httpx2 && pip install "openai==3.14.0"
 ```
 
-`inspect-harbor` pulls in `litellm`, which pins `openai<3`, while Inspect's OpenAI-compatible providers need
-`openai>=3`; installing `openai==3.14.0` last overrides the pin (pip prints a conflict warning that is harmless
-here because Inspect's agent path never imports `litellm`). `httpx2` is imported by `inspect-ai` but not declared.
+Check `logs/serve.log` at start-up: `max_model_len` 262144, KV cache dtype `bfloat16`, and the default sampling
+params vLLM takes from the checkpoint's `generation_config.json` (temperature 1.0, top_p 0.95, top_k 20).
 
-Model weights and datasets are fetched from the Hugging Face Hub on first use into the usual cache (`HF_HOME`
-if set). Export `HF_TOKEN` in your shell before running (never in the repo); nothing here is gated, but anonymous Hub
-downloads are rate-limited.
+Docker with the compose plugin (v2.x or later) is required for the sandboxes (podman serves the model only).
+`local_orchestrator.sh` exports `DOCKER_HOST` for a rootless daemon (`unix:///run/user/<uid>/docker.sock`); with a
+rootful daemon drop that export. Rootless Docker needs
+a runc runtime with `NoNewKeyring` in `daemon.json` (one kernel key per container otherwise exhausts a user's quota of
+200) and cannot apply CPU limits, hence `-T override_cpus=0` in `run_eval.sh`. Check the image-store disk space before
+the first run (see `local_env_notes.md`).
 
-Docker (with the compose plugin) must be reachable by your user. `local_orchestrator.sh` exports `DOCKER_HOST` for
-a rootless daemon (`unix:///run/user/<uid>/docker.sock`, image store under `~/.local/share/docker`); with a
-rootful daemon drop that export. Check the image-store disk space quoted below before the first run. Rootless
-Docker needs a runc runtime with `NoNewKeyring` in `daemon.json` (one kernel key per container otherwise
-exhausts a user's quota of 200) and cannot apply CPU limits, hence `-T override_cpus=0` in `run_eval.sh`.
+**What to expect on the first run:** Harbor downloads the 89 task definitions (59 MB), then Inspect pulls one prebuilt
+image per task from Docker Hub as containers start (21 GB compressed, about 70 GB on disk, nothing is built). Docker
+Hub's anonymous limit is 100 pulls per hour per IP, so pre-pull with `docker pull` if needed. The task files, including
+`solution/solve.sh` and `tests/`, are public, so audit every run for agents that download their own task's files
+(AGENTS.md, section 11).
+`local_orchestrator.sh` serves the checkpoint from the Hugging Face Hub (`MODEL`) through the host's HF cache (`HF_HOME`,
+mounted into the container): download it there once with `hf download` and export `HF_HUB_OFFLINE=1`, or set
+`MODEL_PATH` there to serve a local copy instead. Export `HF_TOKEN` in your shell before running (never in the repo); the Harbor task files come from the hub package at the pinned digest.
 
 ### Run the eval
 
@@ -73,64 +85,29 @@ inspect view --log-dir ./logs
 
 Always smoke-test first: `EPOCHS=1 ./local_orchestrator.sh --limit 2`
 
-Requires Docker with roughly 70 GB free in its image store. **What to expect on the first run:**
-Harbor downloads the 89 task definitions into `~/.cache/harbor/tasks/packages/terminal-bench/`
-(59 MB), then Inspect pulls one prebuilt image per task from Docker Hub as containers start
-(21 GB compressed, about 70 GB on disk, nothing is built). Docker Hub's anonymous limit is 100 pulls per
-hour per IP, so the first run may stall on pulls; pre-pull with `docker pull` if needed. Later runs reuse
-the images. Once samples start, all 267 samples (89 tasks x 3 epochs) run at once; memory caps total
-1.6 TB but real usage is far lower, and CPU is uncapped.
-
 ## Results
+
+Not run yet. `run_eval.sh` records the configuration below; fill the tables from the final `.eval` log (AGENTS.md,
+section 5) after the leak audit of section 11, with sample errors counted as failures.
 
 With model generation config:
 
-`temperature=1.0, top_p=0.95, top_k=20, reasoning_effort=xhigh, max_tokens=65536 (per turn), max_connections=267, max_sandboxes=267, time_limit=7200s, client_timeout=7200, override_cpus=0, epochs=3 (mean)`
+`temperature=1.0, top_p=0.95, top_k=20, reasoning_effort=xhigh, max_tokens=65536 (per turn), max_connections=89, max_sandboxes=89, time_limit=7200s, client_timeout=7200, override_cpus=0, kv_cache_dtype=bfloat16, TP=2 DP=4, epochs=1`
 
 the following scores and token stats are obtained:
 
 | metric | value |
 |---|---|
-| accuracy (avg@3) | 0.493 |
-| stderr | 0.0449 |
-| per-epoch pass rate | 0.562 / 0.449 / 0.466 |
-| samples | 267 (89 tasks x 3 epochs) |
-| tasks passing 3/3, 2/3 or 1/3, 0/3 | 29 / 29 / 31 |
-| time-limit hits (7200 s) | 138 (19 of them still passed the verifier) |
-| samples ending without `submit()` | 266 |
-| turns truncated at max_tokens | 9 |
-| context compactions | 0 |
-| sample errors | 1 (feal-differential-cryptanalysis epoch 3: verifier exceeded Harbor's 1800 s test timeout; excluded from the score) |
+| | |
 
 | tokens / sample | input | output | reasoning |
 |---|---|---|---|
-| mean | 726,177 | 34,280 | 26,942 |
-| median | 345,120 | 23,565 | 18,938 |
-| max | 5,942,977 | 100,274 | 92,169 |
-
-Input tokens are cumulative over agent turns (history is resent each turn). Agent turns per
-sample: median 19, mean 23, max 88. Wall time per sample: median 7,207 s,
-mean 4,612 s, max 7,764 s. The verifier scores the container state whether or not the agent
-called `submit()`, so ending without it is not a failure by itself. Total run time about 2 h 30 min on
-8x H100 (267 concurrent samples).
-
-Always-failing tasks (0/3): build-pov-ray, chess-best-move, cobol-modernization, compile-compcert, dna-assembly, extract-moves-from-video, filter-js-from-html, fix-ocaml-gc, gcode-to-text, gpt2-codegolf, install-windows-3.11, largest-eigenval, mailman, make-doom-for-mips, make-mips-interpreter, mteb-leaderboard, mteb-retrieve, path-tracing, path-tracing-reverse, qemu-alpine-ssh, qemu-startup, query-optimize, raman-fitting, regex-chess, sanitize-git-repo, schemelike-metacircular-eval, torch-pipeline-parallelism, tune-mjcf, video-processing, winning-avg-corewars, write-compressor.
-
-## Notes for future runs
-
-- A first full run with `--time-limit 3600` (same config otherwise) scored 0.449 avg@3 with 153 of 267
-  samples hitting the limit; raising it to 7200 s gave 0.493 with 138 hits, a gain within one stderr.
-- The 119 samples that timed out and failed had already generated a median 36,600 output tokens over
-  23 turns (passing samples: 15,700 tokens, 14 turns) and spent a median 3,400 s of their 7,280 s
-  generating; the rest was tool execution (builds, training). More time is unlikely to flip them.
-- 25 tasks timed out in all three epochs; Harbor's own budgets for 24 of them are 900 to 3600 s, so
-  7200 s is already 2 to 8x the official budget. Only `build-pov-ray` (12000 s) has a larger one.
-- The limit is wall-clock per sample while all in-flight samples share one vLLM server, so per-sample
-  generation speed scales with 1/concurrency (about 9 tokens/s at 267). Running 89 at a time would
-  give each sample about 3x the generation budget in the same 7200 s, at about 3x the run time, and
-  would not change tool-execution time. Per-task Harbor timeouts would be the faithful fix but
-  `inspect_harbor` does not support them.
+| | | | |
 
 ## Patches for upstream
 
-None.
+None. Known tooling issues, documented for the run: Inspect's `vllm` provider learns the served context window
+(262,144) from `/v1/models` on a sample's first model call, but the ReAct agent's compaction threshold (90% of the
+window) is resolved at sample start, so samples that start before the first call fall back to Inspect's 128,000
+default; trajectories whose own messages exceed the threshold after compaction end with `RuntimeError: Compaction
+insufficient` and are scored as failures.

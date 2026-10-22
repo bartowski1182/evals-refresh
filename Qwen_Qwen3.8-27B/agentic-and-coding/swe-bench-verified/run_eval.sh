@@ -3,21 +3,29 @@
 #
 # What this measures: the 500 instances of SWE-bench Verified (HF princeton-nlp/SWE-bench_Verified, revision pinned by
 # inspect_evals 0.20.0), solved agentically with inspect_evals's default ReAct agent (python, bash_session, text_editor;
-# 210 s tool timeout) inside Epoch AI's prebuilt per-instance Docker images, no internet. The official swebench harness
-# grades FAIL_TO_PASS and PASS_TO_PASS tests. Neither model card reports SWE-bench Verified.
+# 210 s tool timeout), no internet. The official swebench harness grades FAIL_TO_PASS and PASS_TO_PASS tests. The
+# Qwen3.8-27B model card does not report SWE-bench Verified.
 #
-# --max-tokens is per turn; 65536 leaves room for several turns inside the 262k context.
-# --message-limit 200 (about 100 agent turns; the package default of 30 cut smoke samples off after 13 turns);
-# --time-limit 14400 caps wall time per sample as a runaway guard (about 3 turns/min per sample with 56 in flight and a warm prefix cache).
-# --max-sandboxes equals --max-connections: Inspect holds one container per in-flight sample. 56 in flight is what
-# the server's KV cache holds (4.0M tokens at TP=8; mean request carries ~41k tokens of history after an hour); above that vLLM
-# preempts requests and evicts prefix-cache entries, and per-sample speed collapses (0.4 turns/min at 234, 0.55 at 128, 0.5 at 96). Retune a running eval with `inspect ctl config --key vllm/<model> N --max-samples N`.
-# -M client_timeout raises Inspect's HTTP timeout (default 600s) for long reasoning turns.
-# --fail-on-error 0.1 aborts only if >10% of samples hit infrastructure errors.
+# Copied from the Qwen3.8-Flash-Next SWE-bench Verified dir, which carries the solution-leak fix (AGENTS.md, section
+# 11). -T image_name_template selects the official SWE-bench images (Docker Hub, built with the current swebench
+# harness, which removes the remote, deletes tags newer than the base commit and prunes unreachable objects).
+# inspect_evals' default Epoch AI images (ghcr.io) keep every release tag of the project, so the reference fix can be
+# read offline (see README).
+# Identical in the three dirs of the Qwen3.8-27B comparison set (Qwen/Qwen3.8-27B, RedHatAI/Qwen3.8-27B-MXFP4,
+# RedHatAI/Qwen3.8-27B-MXFP4xFP8) apart from the MODEL default; one epoch (pass@1) in each.
 #
-# Sampling params come from the model's generation_config.json (temp 1.0, top_p 0.95, top_k 20).
+# Sampling params: temperature 1.0, top_p 0.95, top_k 20, the generation_config.json values of Qwen/Qwen3.8-27B and
+# RedHatAI/Qwen3.8-27B-MXFP4 (the MXFP4xFP8 repository was not public when these dirs were written: check its
+# generation_config.json before running it). Inspect drops --top-k; vLLM applies the checkpoint's value as the server
+# default (logged at start-up).
 # --reasoning-effort is forwarded by Inspect as the OpenAI `reasoning_effort` field; vLLM turns it
 # into chat_template_kwargs {"enable_thinking": true, "reasoning_effort": "xhigh"} (see the recipe).
+# --max-tokens is per turn; 65536 leaves room for several turns inside the 262k context.
+# --message-limit 200 (about 100 agent turns; the package default of 30 cuts samples off after about 13 turns), as in
+# the other SWE-bench Verified dirs; --time-limit 14400 caps wall time per sample as a runaway guard.
+# --max-sandboxes equals --max-connections: Inspect holds one container per in-flight sample.
+# -M client_timeout raises Inspect's HTTP timeout (default 600s) for long reasoning turns.
+# --fail-on-error 0.1 aborts only if >10% of samples hit infrastructure errors.
 set -euo pipefail
 
 MODEL="${MODEL:-Qwen/Qwen3.8-27B}"
@@ -29,6 +37,7 @@ export VLLM_BASE_URL="${VLLM_BASE_URL:-http://localhost:${PORT}/v1}"
 export VLLM_API_KEY="${VLLM_API_KEY:-local}"
 
 inspect eval inspect_evals/swe_bench \
+  -T image_name_template='swebench/sweb.eval.{arch}.{org}_1776_{repo}-{issue}:latest' \
   --model "vllm/${MODEL}" \
   --epochs "$EPOCHS" --epochs-reducer mean \
   --temperature 1.0 --top-p 0.95 --top-k 20 \

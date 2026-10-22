@@ -8,49 +8,60 @@
 | vLLM recipe | https://recipes.vllm.ai/Qwen/Qwen3.8-27B |
 | Task source | https://github.com/ShishirPatil/gorilla/tree/main/berkeley-function-call-leaderboard |
 
-**Protocol note.** Neither model card reports BFCL. The official leaderboard's overall score (BFCL v4) also
-covers the agentic V4 categories (web search, which needs a SerpAPI key, and memory, which needs a two-step
-snapshot workflow) and the retired `rest` category; this run covers the V1 single-turn (AST-matched), V2 live
-(user-contributed) and V3 multi-turn (stateful backends) categories only, so per-category accuracies are
-comparable to the leaderboard's and the overall number is not. Tools are passed natively (FC mode) and
-parsed by vLLM's tool parser; the model reasons before every call. avg@3 as usual in this repo.
+**Protocol note.** No model card reports BFCL. The official leaderboard's overall score (BFCL v4) also covers the
+agentic V4 categories (web search, which needs a SerpAPI key, and memory, which needs a two-step snapshot workflow)
+and the retired `rest` category; this run covers the V1 single-turn (AST-matched), V2 live (user-contributed) and V3
+multi-turn (stateful backends) categories only, so per-category accuracies are comparable to the leaderboard's and the
+overall number is not. Tools are passed natively (FC mode) and parsed by vLLM's tool parser; the model reasons before
+every call. One epoch (pass@1); one TP=8 replica so every turn of a sample hits one prefix cache. This dir is one of the three identical copies of the task that make up the Qwen3.8-27B comparison set (`Qwen_Qwen3.8-27B`, `RedHatAI_Qwen3.8-27B-MXFP4`, `RedHatAI_Qwen3.8-27B-MXFP4xFP8`): same task, agent, prompt, sampling, limits, concurrency, epochs (one, pass@1), vLLM release and serving topology, so the three numbers are like for like; only the checkpoint differs.
+
+**Checkpoint.** `Qwen/Qwen3.8-27B` is the BF16 base model of the comparison set, the reference the two RedHatAI
+quantized checkpoints are measured against. The KV cache is BF16 (`--kv-cache-dtype bfloat16`, this checkpoint's
+default, spelled out so that the three `serve.sh` are identical), and vLLM 0.32.0 is used for the three dirs (see
+Setup). Record the checkpoint revision here before the run.
 
 ## Files
 
 - `serve.sh` — deploys the model with a vLLM server. vLLM-serve arguments live here
-  (parallelism, context length, reasoning/tool parsers), taken from the official recipe.
+  (parallelism, context length, reasoning/tool parsers), taken from the Qwen/Qwen3.8-27B recipe, plus the BF16 KV cache; identical in the three dirs apart from
+  `MODEL`.
 - `run_eval.sh` — runs the Inspect task against that server. Inspect-side params live here
-  (epochs, sampling params, per-turn max tokens, time limit, concurrency).
-- `server_requirements.txt` / `client_requirements.txt` — `pip freeze` of the vLLM and Inspect
-  venvs that produced the results below.
-- `local_orchestrator.sh` — runs everything in your local dev environment: activates the
-  venvs, sets GPUs and TP/DP, starts `serve.sh` in the background, runs `run_eval.sh`, tears down.
+  (epochs, sampling params, per-turn max tokens, time limit, concurrency); identical in the three dirs apart from `MODEL`.
+- `server_requirements.txt` / `client_requirements.txt` — `pip freeze` inside the vLLM image and of the Inspect venv
+  that produce the results, with the host (GPUs, driver, CUDA, Python) in the header. Written after the final run; not present yet.
+- `local_orchestrator.sh` — runs everything in your local dev environment: starts `serve.sh` inside the vLLM podman image (GPUs 0-7, port 8000, one TP=8 replica, the HF cache and the task dir mounted), waits for the server, activates the client venv, runs `run_eval.sh`, stops the container.
   **This is the only file you should modify** to match the environment you run in.
 
 ## Run
 
 ### Setup (once per host)
 
-Create a server and a client environment as below. The commands use the paths that `local_orchestrator.sh` activates;
-if you keep the environments elsewhere, change the paths there. `server_requirements.txt` and
-`client_requirements.txt` are the exact `pip freeze` of the environments that produced the results below (Python 3.12,
-host details in their headers): installing from them reproduces those environments; the commented alternative gives an
-equivalent fresh install with the same pinned versions.
+Pull the server image and create the client environment as below. The commands use the image reference and the venv
+path that `local_orchestrator.sh` uses; if you keep them elsewhere, change them there. Once the results are in,
+`server_requirements.txt` (`pip freeze` inside the image) and `client_requirements.txt` hold the exact packages that
+produced them (host details in their headers); create the client environment from its file instead. Use the same image
+and client environments for the three dirs of the comparison set.
 
 ```bash
-# server: vLLM 0.29.0 (CUDA 13 wheels; add the matching https://download.pytorch.org/whl/<cuXXX> index if pip cannot resolve torch)
-python3.12 -m venv ~/.venvs/vllm && source ~/.venvs/vllm/bin/activate
-pip install -r server_requirements.txt          # or: pip install vllm==0.29.0
-# client: Inspect
+# server: the vLLM 0.32.0 podman image, docker.io/vllm/vllm-openai:v0.32.0 pinned by digest (IMAGE in
+# local_orchestrator.sh), the same image for the three dirs. 0.32.0 is the first release with the dense MXFP4-weight /
+# FP8-activation scheme the MXFP4xFP8 checkpoint needs; the humming-kernels dependency of its CUDA wheels provides the
+# only MXFP4 GEMM of that release that takes FP8 activations (CUDA, SM75+), so the comparison set needs an NVIDIA host.
+# GPU access from the container goes through the NVIDIA Container Toolkit's CDI spec (generated once per host, as root).
+podman pull docker.io/vllm/vllm-openai:v0.32.0@sha256:befccf0e7e4089aa23926bb6f887a85c0d46c2a99e6de5c5ffdf5cb7957c5b34
+sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+# client: Inspect + inspect_evals with the bfcl extra, from the fork branch that carries the multi-turn scorer fix (see Patches)
 python3.12 -m venv ~/.venvs/inspect && source ~/.venvs/inspect/bin/activate
-pip install -r client_requirements.txt          # what produced the results (inspect_evals 0.20.0); or the current setup, the
-# scorer fix straight from the fork branch (see Patches):
-# pip install "inspect-evals[bfcl] @ git+https://github.com/eldarkurtic/inspect_evals@fix/bfcl-multi-turn-scorer-short-trajectories" openai
+pip install "inspect-evals[bfcl] @ git+https://github.com/eldarkurtic/inspect_evals@fix/bfcl-multi-turn-scorer-short-trajectories" "openai==3.14.0"
 ```
 
-Model weights and datasets are fetched from the Hugging Face Hub on first use into the usual cache (`HF_HOME`
-if set). Export `HF_TOKEN` in your shell before running (never in the repo); nothing here is gated, but anonymous Hub
-downloads are rate-limited.
+Check `logs/serve.log` at start-up: `max_model_len` 262144, KV cache dtype `bfloat16`, and the default sampling
+params vLLM takes from the checkpoint's `generation_config.json` (temperature 1.0, top_p 0.95, top_k 20).
+
+No Docker needed. The first run clones the gorilla repository at the pinned commit for the data and the multi-turn backends.
+`local_orchestrator.sh` serves the checkpoint from the Hugging Face Hub (`MODEL`) through the host's HF cache (`HF_HOME`,
+mounted into the container): download it there once with `hf download` and export `HF_HUB_OFFLINE=1`, or set
+`MODEL_PATH` there to serve a local copy instead. Export `HF_TOKEN` in your shell before running (never in the repo); nothing here is gated, but anonymous Hub downloads are rate-limited.
 
 ### Run the eval
 
@@ -61,55 +72,30 @@ inspect view --log-dir ./logs
 
 Always smoke-test first: `EPOCHS=1 ./local_orchestrator.sh --limit 5`
 
-No Docker needed. The first run clones the gorilla
-repository at the pinned commit for the data and the multi-turn backends.
-
 ## Results
+
+Not run yet. `run_eval.sh` records the configuration below; fill the tables from the final `.eval` log (AGENTS.md,
+section 5), with sample errors counted as failures.
 
 With model generation config:
 
-`temperature=1.0, top_p=0.95, top_k=20, reasoning_effort=xhigh, max_tokens=65536 (per turn), time_limit=7200s, client_timeout=7200, TP=8 DP=1, epochs=3, 64 samples in flight; two runs: all categories at time_limit=1800s, then the five multi-turn categories again at 7200s (the table uses the rerun for them)`
+`temperature=1.0, top_p=0.95, top_k=20, reasoning_effort=xhigh, max_tokens=65536 (per turn), time_limit=7200s, client_timeout=7200, kv_cache_dtype=bfloat16, TP=8 DP=1, epochs=1, 64 samples in flight`
 
 the following scores and token stats are obtained:
 
 | metric | value |
 |---|---|
-| accuracy over all 4981 samples (avg@3, sample-weighted) | 0.683 |
-| stderr (binomial on 4981 samples) | 0.0066 |
-| non-live AST (simple, multiple, parallel, parallel_multiple) | 0.819 (1150 samples) |
-| non-live exec (AST-scored) | 0.874 (240 samples) |
-| live AST | 0.705 (1351 samples) |
-| relevance / irrelevance | 0.746 (1140 samples) |
-| multi-turn | 0.431 (1000 samples) |
-| sql | 0.177 (100 samples) |
-| samples | 14943 (4981 x 3 epochs, in 2 runs) |
-| time-limit hits (1800, 7200 s) | 0 |
-| turns truncated at max_tokens | 8 |
-| sample errors (excluded from the score) | 0 |
-
-Per category (accuracy, samples): simple_python 0.908 (400), simple_java 0.390 (100), simple_javascript 0.287 (50), multiple 0.885 (200), parallel 0.913 (200), parallel_multiple 0.828 (200), exec_simple 0.957 (100), exec_multiple 0.880 (50), exec_parallel 0.853 (50), exec_parallel_multiple 0.683 (40), live_simple 0.752 (258), live_multiple 0.691 (1053), live_parallel 0.875 (16), live_parallel_multiple 0.708 (24), irrelevance 0.776 (240), live_relevance 0.708 (16), live_irrelevance 0.738 (884), multi_turn_base 0.623 (200), multi_turn_miss_func 0.403 (200), multi_turn_miss_param 0.515 (200), multi_turn_long_context 0.583 (200), multi_turn_composite 0.030 (200), sql 0.177 (100).
+| | |
 
 | tokens / sample | input | output | reasoning |
 |---|---|---|---|
-| mean | 40,653 | 3,797 | 1,156 |
-| median | 793 | 263 | 153 |
-| max | 7,568,908 | 282,461 | 218,217 |
-
-Input tokens are cumulative over turns (multi-turn categories resend history). Model calls per sample: median 1, mean 4.0, max 152.
-Wall time per sample: median 6 s, mean 106 s, max 6,759 s. Total run time 12 h 05 min on 8x H100.
-
-In the first pass (1800 s limit) 215 multi-turn samples hit the time limit and 51 of them raised
-`ValueError: zip() argument 2 is shorter than argument 1` in the package's multi-turn scorer (a truncated trajectory
-is shorter than the ground-truth turn list), so the five multi-turn categories were rerun at 7200 s with no
-time-limit hits and no errors; their first-pass accuracy was 0.423 against 0.431 in the rerun.
+| | | | |
 
 ## Patches for upstream
 
 `inspect_evals/bfcl/score/multi_turn_scorer.py` raises `ValueError: zip() argument 2 is shorter than argument 1`
 instead of scoring 0 when a multi-turn sample ends (time or message limit) with fewer turns than the ground truth
-has, so such samples become sample errors excluded from accuracy. Reported as
+has, so such samples become sample errors. Reported as
 https://github.com/UKGovernmentBEIS/inspect_evals/issues/2544; the fix (missing turns count as empty, task version
-8-B) is branch `fix/bfcl-multi-turn-scorer-short-trajectories` of https://github.com/eldarkurtic/inspect_evals,
-which the client venv installs from (see Setup). The results below were produced with inspect_evals 0.20.0; the
-first pass hit the defect on 51 samples and the affected categories were rerun at a longer time limit, after which
-no sample ends early, so the fix does not change the reported numbers.
+8-B) is branch `fix/bfcl-multi-turn-scorer-short-trajectories` of https://github.com/eldarkurtic/inspect_evals, which
+the client venv installs from (see Setup).
