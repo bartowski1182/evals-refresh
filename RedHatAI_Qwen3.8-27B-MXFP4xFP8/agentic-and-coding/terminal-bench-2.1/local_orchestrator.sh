@@ -19,6 +19,7 @@
 # HF_HUB_OFFLINE=1, so that the engines don't call the Hub at start-up (anonymous calls are rate-limited per IP);
 # HF_TOKEN and HF_HUB_OFFLINE are passed through when set.
 # The container runs as root (vLLM's Dockerfile), so /root/.cache is its cache directory.
+export PATH="$HOME/bin:$PATH"
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7}"
 export PORT="${PORT:-8000}"
 # export MODEL_PATH=/path/to/Qwen3.8-27B-MXFP4xFP8   # serve a local copy of the checkpoint instead of the HF id (mounted below)

@@ -23,6 +23,7 @@
 # HF_HUB_OFFLINE=1, so that the engines don't call the Hub at start-up (anonymous calls are rate-limited per IP);
 # HF_TOKEN and HF_HUB_OFFLINE are passed through when set.
 # The container runs as root (vLLM's Dockerfile), so /root/.cache is its cache directory.
+export PATH="$HOME/bin:$PATH"
 export TP="${TP:-4}" DP="${DP:-1}"
 export PORT="${PORT:-8000}"
 export USER_PORT="${USER_PORT:-8001}" USER_TP="${USER_TP:-4}"

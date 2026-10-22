@@ -17,6 +17,7 @@
 # --ulimit memlock/stack/nproc: unlimited pinned memory and processes, 64 MB thread stacks, for NCCL and the TP workers.
 # HF_HUB_OFFLINE=1: the checkpoint is pre-downloaded to MODEL_PATH (453 GB; hf download, on local disk).
 # The container runs as root (vLLM's Dockerfile), so /root/.cache is its cache directory.
+export PATH="$HOME/bin:$PATH"
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7}"
 export PORT="${PORT:-8000}"
 export TP="${TP:-8}" DP="${DP:-1}"
