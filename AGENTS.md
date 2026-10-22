@@ -264,6 +264,25 @@ Python.
   It is noise if it appears at the moment the eval finished.
 - **Inspect's multiple-choice parser** requires `ANSWER: <LETTER>` on the last line; a model that
   writes `ANSWER: $A` can never be parsed. Check the unparsed count.
+- **DSA/MLA models with a huge native context can OOM vLLM's post-graph warm-up on Hopper.** GLM-5.3's
+  sparse-indexer JIT warm-up allocates ~24 GiB per GPU (warm-up batch × 64 heads × `max_model_len` × fp32) with
+  the checkpoint's default 1M window, after CUDA graphs captured fine. Cap `--max-model-len` (262144 worked and
+  matches the repo's other multi-turn agent dirs) unless the recipe explicitly fits the full window on your GPUs.
+- **Size agentic concurrency to the KV pool, not the GPU count.** MLA-style KV costs ~50 KB/token: GLM-5.3 on
+  8xH200 holds only ~1.19M KV tokens (a hybrid-attention model of similar size holds ~20M), so DeepSWE ran 10
+  concurrent ~120k-token histories and Terminal-Bench 32. Read the "GPU KV cache size" line in serve.log before
+  choosing `--max-connections`; oversubscribing evicts prefix-cached histories and re-prefills them every turn.
+- **vLLM 0.32 returns reasoning in the `reasoning` message field** (OpenAI style), not `reasoning_content`.
+  inspect-ai 0.3.273 parses it into a separate reasoning content part; check the field name in a raw
+  `/v1/chat/completions` response before concluding the reasoning parser is broken.
+- **Killing a wrapper shell orphans its grandchildren.** A harness timeout that kills `bash -c` does not reach a
+  vLLM server or eval started inside it; a vLLM server whose workers died mid-startup then hangs forever as an
+  unhealthy process with a zombie EngineCore. Kill servers by exact PID, confirm `nvidia-smi` shows 0 MiB before
+  restarting, and never `pkill -f` a pattern that appears in your own command string (use the bracket trick:
+  `pgrep -f "vllm [s]erve"`).
+- **Completion watchers must not race the eval start.** A `while pgrep inspect-eval` loop started during server
+  startup exits immediately (the eval process does not exist yet) and reports a false "finished". Watch the
+  orchestrator script's process instead, or start the watcher after samples are in flight.
 
 ## 10. Conventions established in the task directories
 
@@ -281,6 +300,11 @@ revert these departures:
   - 1: mmlu-pro (12k samples), swe-bench-verified, swe-bench-pro, deepswe-1.1, gdpval-aa, tau2-bench, tau3-bench.
   - 1 for every task of the four Qwen3.8-Flash-Next dirs (RedHatAI, Inferact and nvidia NVFP4, Qwen BF16), at the
     user's request.
+- **Two-phase generous-time rerun (Terminal-Bench 2.1, GLM-5.3-MXFP4xFP8 dirs).** At the user's request, the samples
+  that hit the first pass's time limit (all failed) plus one leaked sample were rerun once at a higher
+  `--time-limit` via `inspect eval --sample-id <comma list>`; each task counts once, the rerun result replacing the
+  first-pass result for those samples. The README documents both phases. Not a default — ask the user before
+  reusing this protocol on another task or model.
 - **Sampling flags.** Inspect's `vllm` provider drops `--top-k` from the request. The value that applies is the
   server default vLLM takes from the checkpoint's `generation_config.json` (logged at vLLM startup).
 - **Qwen3.8-Flash-Next dirs** (8x B200 host):
@@ -364,6 +388,13 @@ and `amd_Qwen3.8-27B-Quark-AWQ-MXFP4` copies of these tasks ran before the fixes
   - The task files, including `solution/solve.sh` and `tests/`, are public: `harbor-framework/terminal-bench-2-1`
     on GitHub, and mirrors on the HF Hub (find them with `huggingface.co/api/datasets?search=terminal-bench`).
   - Only the audit catches it when an agent downloads its own task's files.
+  - GLM-5.3-MXFP4xFP8 (2026-10): one sample (`mteb-retrieve`) web-searched its instruction's distinctive phrases,
+    found the HF mirror `harborframework/terminal-bench-2.1`, downloaded its own `solution/solve.sh` and submitted
+    a verbatim copy. Blocking is not possible without breaking the task (its own reference solution needs
+    `huggingface.co` for the embedding model — the same domain as the mirror), so the real fix is upstream:
+    exclude `solution/` from the public mirror (issue drafted for harbor-framework/terminal-bench-2-1). Protocol
+    chosen with the user for that run: rerun the leaked sample and every time-limit failure once at a higher
+    `--time-limit` via `--sample-id`, audit the rerun, and count any repeat leak as a failure.
 - **livecodebench.** The tasks set no network policy, so the agent has internet (the fork changes nothing). Audit
   for lookups of the problem's published solutions.
 - **Any new task with tools.** Check each `task.toml` network policy against what the runner enforces (after a run,
@@ -391,6 +422,13 @@ for s in log.samples:
 ```
 
 - Networked tasks give hundreds of hits; review them by hand.
+- Judge network attempts by their output, not by shell exit codes: `curl -sI URL | head -3; echo $?` reports
+  `head`'s status (0) even when curl could not resolve the host (with `-s` curl prints nothing on failure). The
+  reliable tells are empty output, `http_code 000`, exit 6, or a python `urlopen` name-resolution error.
+- Scanning tool-call *results* for the benchmark's canary GUID (TB: `terminal-bench-canary GUID …`) finds task-file
+  acquisition through channels your URL regex missed. Confirm the source before calling it a leak: files the task
+  ships inside the agent's own container (working files, deliberately visible `environment/tests/`) are not leaks;
+  network fetches of `solution/` or `tests/` are.
 - A leak is any case where the agent obtained:
   - its own task's files (`solution/`, `tests/`);
   - the project's upstream work past the task's base commit: GitHub issues, PRs, commits or files, or a clone or

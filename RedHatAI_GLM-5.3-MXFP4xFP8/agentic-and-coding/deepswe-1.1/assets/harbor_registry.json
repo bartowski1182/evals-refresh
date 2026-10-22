@@ -1,0 +1,687 @@
+[
+ {
+  "name": "deep-swe-1-1",
+  "version": "1.1",
+  "description": "DeepSWE 1.1, the 113 tasks of the (Harbor hub package datacurve/deep-swe-1-1). Pinned by evals-refresh to eldarkurtic/deep-swe branch fix/verifier-cpu-affinity (89080fcd34), which carries datacurve-ai/deep-swe#100.",
+  "tasks": [
+   {
+    "name": "abs-module-cache-flags",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/abs-module-cache-flags"
+   },
+   {
+    "name": "abs-stepped-slices",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/abs-stepped-slices"
+   },
+   {
+    "name": "actionlint-action-pinning-lint",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/actionlint-action-pinning-lint"
+   },
+   {
+    "name": "adaptix-name-mapping-aliases",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/adaptix-name-mapping-aliases"
+   },
+   {
+    "name": "aiomonitor-task-snapshots-diff",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/aiomonitor-task-snapshots-diff"
+   },
+   {
+    "name": "anko-default-function-arguments",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/anko-default-function-arguments"
+   },
+   {
+    "name": "anko-typed-variable-bindings",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/anko-typed-variable-bindings"
+   },
+   {
+    "name": "arcane-drift-detection-baselines",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/arcane-drift-detection-baselines"
+   },
+   {
+    "name": "arktype-json-schema-refs-dependencies",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/arktype-json-schema-refs-dependencies"
+   },
+   {
+    "name": "awilix-async-container-initialization",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/awilix-async-container-initialization"
+   },
+   {
+    "name": "bandit-incremental-cache-control",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/bandit-incremental-cache-control"
+   },
+   {
+    "name": "bandit-interprocedural-taint-checks",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/bandit-interprocedural-taint-checks"
+   },
+   {
+    "name": "bandit-structured-nosec-directives",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/bandit-structured-nosec-directives"
+   },
+   {
+    "name": "boa-hierarchical-evaluation-cancellation",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/boa-hierarchical-evaluation-cancellation"
+   },
+   {
+    "name": "cattrs-partial-structuring-recovery",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/cattrs-partial-structuring-recovery"
+   },
+   {
+    "name": "clack-async-autocomplete-options",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/clack-async-autocomplete-options"
+   },
+   {
+    "name": "claude-code-by-agents-recursive-delegation",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/claude-code-by-agents-recursive-delegation"
+   },
+   {
+    "name": "cliffy-config-file-parsing",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/cliffy-config-file-parsing"
+   },
+   {
+    "name": "csstree-shorthand-expansion-compression",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/csstree-shorthand-expansion-compression"
+   },
+   {
+    "name": "dasel-html-document-format",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/dasel-html-document-format"
+   },
+   {
+    "name": "dateutil-rfc5545-timezone-interop",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/dateutil-rfc5545-timezone-interop"
+   },
+   {
+    "name": "drizzle-orm-window-function-builders",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/drizzle-orm-window-function-builders"
+   },
+   {
+    "name": "dynamodb-toolbox-conditional-attribute-requirements",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/dynamodb-toolbox-conditional-attribute-requirements"
+   },
+   {
+    "name": "dynamodb-toolbox-lazy-recursive-schemas",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/dynamodb-toolbox-lazy-recursive-schemas"
+   },
+   {
+    "name": "effect-sse-httpapi-streaming",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/effect-sse-httpapi-streaming"
+   },
+   {
+    "name": "eicrud-keyset-pagination-cursor",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/eicrud-keyset-pagination-cursor"
+   },
+   {
+    "name": "etree-xml-diff-patch",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/etree-xml-diff-patch"
+   },
+   {
+    "name": "expr-try-catch-errors",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/expr-try-catch-errors"
+   },
+   {
+    "name": "fastapi-deprecation-response-headers",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/fastapi-deprecation-response-headers"
+   },
+   {
+    "name": "fastapi-implicit-head-options",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/fastapi-implicit-head-options"
+   },
+   {
+    "name": "fd-deterministic-multi-key-sorting",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/fd-deterministic-multi-key-sorting"
+   },
+   {
+    "name": "geo-shapeindex-serialization",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/geo-shapeindex-serialization"
+   },
+   {
+    "name": "go-critic-doc-link-checker",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/go-critic-doc-link-checker"
+   },
+   {
+    "name": "go-genai-streamed-function-args",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/go-genai-streamed-function-args"
+   },
+   {
+    "name": "go-git-worktree-merge-conflicts",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/go-git-worktree-merge-conflicts"
+   },
+   {
+    "name": "goreleaser-retry-publish-auditing",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/goreleaser-retry-publish-auditing"
+   },
+   {
+    "name": "gql-incremental-graphql-delivery",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/gql-incremental-graphql-delivery"
+   },
+   {
+    "name": "happy-dom-abort-pending-body-reads",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/happy-dom-abort-pending-body-reads"
+   },
+   {
+    "name": "happy-dom-deterministic-intersectionobserver",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/happy-dom-deterministic-intersectionobserver"
+   },
+   {
+    "name": "helm-array-merge-strategies",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/helm-array-merge-strategies"
+   },
+   {
+    "name": "helm-unified-manifest-stream",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/helm-unified-manifest-stream"
+   },
+   {
+    "name": "httpx-deterministic-cookie-store",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/httpx-deterministic-cookie-store"
+   },
+   {
+    "name": "httpx-multipart-response-parsing",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/httpx-multipart-response-parsing"
+   },
+   {
+    "name": "httpx-streaming-json-iteration",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/httpx-streaming-json-iteration"
+   },
+   {
+    "name": "igel-persist-feature-schema",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/igel-persist-feature-schema"
+   },
+   {
+    "name": "ink-grid-box-layout",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/ink-grid-box-layout"
+   },
+   {
+    "name": "ipython-session-bundle-replay",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/ipython-session-bundle-replay"
+   },
+   {
+    "name": "katex-multicolumn-array-spans",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/katex-multicolumn-array-spans"
+   },
+   {
+    "name": "kcp-go-multiplexed-kcp-streams",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/kcp-go-multiplexed-kcp-streams"
+   },
+   {
+    "name": "kea-atomic-signal-selectors",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/kea-atomic-signal-selectors"
+   },
+   {
+    "name": "kgateway-consistent-hash-policy",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/kgateway-consistent-hash-policy"
+   },
+   {
+    "name": "kombu-single-active-consumer-priority",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/kombu-single-active-consumer-priority"
+   },
+   {
+    "name": "kombu-virtual-queue-dead-lettering",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/kombu-virtual-queue-dead-lettering"
+   },
+   {
+    "name": "koota-composite-trait-aspects",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/koota-composite-trait-aspects"
+   },
+   {
+    "name": "koota-deferred-mutation-buffer",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/koota-deferred-mutation-buffer"
+   },
+   {
+    "name": "koota-entity-snapshot-rollback",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/koota-entity-snapshot-rollback"
+   },
+   {
+    "name": "koota-pair-relation-tracking",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/koota-pair-relation-tracking"
+   },
+   {
+    "name": "koota-query-predicates",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/koota-query-predicates"
+   },
+   {
+    "name": "kysely-window-grouping-helpers",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/kysely-window-grouping-helpers"
+   },
+   {
+    "name": "langchain-request-coalescing",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/langchain-request-coalescing"
+   },
+   {
+    "name": "mashumaro-flattened-dataclass-fields",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/mashumaro-flattened-dataclass-fields"
+   },
+   {
+    "name": "meriyah-explicit-resource-declarations",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/meriyah-explicit-resource-declarations"
+   },
+   {
+    "name": "mnamer-daemon-watch-lifecycle",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/mnamer-daemon-watch-lifecycle"
+   },
+   {
+    "name": "mobly-grouped-test-barriers",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/mobly-grouped-test-barriers"
+   },
+   {
+    "name": "narwhals-rolling-window-suite",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/narwhals-rolling-window-suite"
+   },
+   {
+    "name": "numba-stencil-boundary-modes",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/numba-stencil-boundary-modes"
+   },
+   {
+    "name": "obsidian-linter-auto-table-of-contents",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/obsidian-linter-auto-table-of-contents"
+   },
+   {
+    "name": "obsidian-linter-link-format-conversion",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/obsidian-linter-link-format-conversion"
+   },
+   {
+    "name": "obsidian-linter-scoped-ignore-markers",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/obsidian-linter-scoped-ignore-markers"
+   },
+   {
+    "name": "ofetch-per-origin-circuit-breaker",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/ofetch-per-origin-circuit-breaker"
+   },
+   {
+    "name": "onedump-dump-encryption-pipeline",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/onedump-dump-encryption-pipeline"
+   },
+   {
+    "name": "opa-rego-rule-profiling",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/opa-rego-rule-profiling"
+   },
+   {
+    "name": "opa-template-string-reconstruction",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/opa-template-string-reconstruction"
+   },
+   {
+    "name": "optique-conditional-option-dependencies",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/optique-conditional-option-dependencies"
+   },
+   {
+    "name": "oxvg-structural-selector-preservation",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/oxvg-structural-selector-preservation"
+   },
+   {
+    "name": "participle-grammar-conflict-analysis",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/participle-grammar-conflict-analysis"
+   },
+   {
+    "name": "pebble-durability-wait-apis",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/pebble-durability-wait-apis"
+   },
+   {
+    "name": "pest-character-class-coalescing",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/pest-character-class-coalescing"
+   },
+   {
+    "name": "prometheus-transactional-reload-status",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/prometheus-transactional-reload-status"
+   },
+   {
+    "name": "prometheus-typed-label-sorting",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/prometheus-typed-label-sorting"
+   },
+   {
+    "name": "psd-tools-blend-range-api",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/psd-tools-blend-range-api"
+   },
+   {
+    "name": "pwntools-tube-multiplexing",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/pwntools-tube-multiplexing"
+   },
+   {
+    "name": "python-statemachine-state-data-scoping",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/python-statemachine-state-data-scoping"
+   },
+   {
+    "name": "query-persist-restored-query-state",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/query-persist-restored-query-state"
+   },
+   {
+    "name": "quill-shared-toolbar-focus",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/quill-shared-toolbar-focus"
+   },
+   {
+    "name": "returns-validated-error-accumulation",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/returns-validated-error-accumulation"
+   },
+   {
+    "name": "scc-bounded-memory-spilling",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/scc-bounded-memory-spilling"
+   },
+   {
+    "name": "scriggo-method-declarations",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/scriggo-method-declarations"
+   },
+   {
+    "name": "skrub-duration-encoding",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/skrub-duration-encoding"
+   },
+   {
+    "name": "sql-formatter-bigquery-pipe-formatting",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/sql-formatter-bigquery-pipe-formatting"
+   },
+   {
+    "name": "sqlfmt-create-table-ddl-formatting",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/sqlfmt-create-table-ddl-formatting"
+   },
+   {
+    "name": "sqlite-utils-safe-import-checkpoints",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/sqlite-utils-safe-import-checkpoints"
+   },
+   {
+    "name": "superjson-error-stack-serialization",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/superjson-error-stack-serialization"
+   },
+   {
+    "name": "task-task-graph-export",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/task-task-graph-export"
+   },
+   {
+    "name": "tengo-callable-instance-isolation",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/tengo-callable-instance-isolation"
+   },
+   {
+    "name": "tengo-destructuring-bindings",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/tengo-destructuring-bindings"
+   },
+   {
+    "name": "termenv-preserve-ansi-resets",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/termenv-preserve-ansi-resets"
+   },
+   {
+    "name": "testem-bail-on-test-failure",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/testem-bail-on-test-failure"
+   },
+   {
+    "name": "testem-per-launcher-reports",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/testem-per-launcher-reports"
+   },
+   {
+    "name": "textual-kitty-key-phases",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/textual-kitty-key-phases"
+   },
+   {
+    "name": "textual-richlog-follow-state",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/textual-richlog-follow-state"
+   },
+   {
+    "name": "tomlkit-toml-table-converters",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/tomlkit-toml-table-converters"
+   },
+   {
+    "name": "true-myth-iterable-collection-combinators",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/true-myth-iterable-collection-combinators"
+   },
+   {
+    "name": "ts-pattern-match-each",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/ts-pattern-match-each"
+   },
+   {
+    "name": "updo-policy-alerting",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/updo-policy-alerting"
+   },
+   {
+    "name": "valibot-recursive-schema-composition",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/valibot-recursive-schema-composition"
+   },
+   {
+    "name": "vitest-duration-sharding",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/vitest-duration-sharding"
+   },
+   {
+    "name": "vulture-persistent-analysis-cache",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/vulture-persistent-analysis-cache"
+   },
+   {
+    "name": "wasmi-trap-coredumps",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/wasmi-trap-coredumps"
+   },
+   {
+    "name": "wazero-multi-module-snapshots",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/wazero-multi-module-snapshots"
+   },
+   {
+    "name": "yaegi-go-embed-directives",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/yaegi-go-embed-directives"
+   },
+   {
+    "name": "yjs-map-conflict-detection",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/yjs-map-conflict-detection"
+   },
+   {
+    "name": "ytt-jsonpath-query-api",
+    "git_url": "https://github.com/eldarkurtic/deep-swe.git",
+    "git_commit_id": "89080fcd34bef6e13c897f034cd8b6de9249d5ec",
+    "path": "tasks/ytt-jsonpath-query-api"
+   }
+  ]
+ }
+]
