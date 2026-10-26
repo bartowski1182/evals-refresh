@@ -8,46 +8,61 @@
 | vLLM recipe | https://recipes.vllm.ai/Qwen/Qwen3.8-27B |
 
 `cot=True` (the package default): every question is asked with the package's chain-of-thought multiple-choice
-prompt (`ANSWER: $LETTER`), answer choices shuffled with the package's fixed seed (`shuffle_choices=42`). The
-dataset is the simple-evals `gpqa_diamond.csv`, verified by SHA256 inside `inspect_evals` (no HF revision).
-The package default is 4 epochs; this run uses the repo convention of 3 (avg@3).
+prompt (`ANSWER: $LETTER`), choices shuffled with the package's fixed seed (`shuffle_choices=42`), from the simple-evals
+`gpqa_diamond.csv` verified by SHA256 inside `inspect_evals`. This dir is one of the three identical copies of the task that make up the Qwen3.8-27B comparison set (`Qwen_Qwen3.8-27B`, `RedHatAI_Qwen3.8-27B-MXFP4`, `RedHatAI_Qwen3.8-27B-MXFP4xFP8`): same task, agent, prompt, sampling, limits, concurrency, epochs (one, pass@1), vLLM release and serving topology, so the three numbers are like for like; only the checkpoint differs. The model cards report GPQA Diamond measured
+with their own harnesses (RedHatAI: lighteval, 3 seeds, 65,536 new tokens), not with this task.
+
+**Checkpoint.** `Qwen/Qwen3.8-27B` is the BF16 base model of the comparison set, the reference the two RedHatAI
+quantized checkpoints are measured against. The KV cache is BF16 (`--kv-cache-dtype bfloat16`, this checkpoint's
+default, spelled out so that the three `serve.sh` are identical), and vLLM 0.32.0 is used for the three dirs (see
+Setup). Record the checkpoint revision here before the run.
 
 ## Files
 
 - `serve.sh` — deploys the model with a vLLM server. vLLM-serve arguments live here
-  (parallelism, context length, reasoning/tool parsers), taken from the official recipe.
+  (parallelism, context length, reasoning/tool parsers), taken from the Qwen/Qwen3.8-27B recipe, plus the BF16 KV cache; identical in the three dirs apart from
+  `MODEL`.
 - `run_eval.sh` — runs the Inspect task against that server. Inspect-side params live here
-  (task, epochs, sampling params, reasoning effort, max tokens, concurrency).
-- `server_requirements.txt` / `client_requirements.txt` — `pip freeze` of the vLLM and Inspect
-  venvs that produced the results below, with the host (GPUs, driver, CUDA, Python) in the header.
-- `local_orchestrator.sh` — runs everything in your local dev environment: activates the
-  venvs, sets GPUs, starts `serve.sh` in the background, runs `run_eval.sh`, tears down.
+  (task, epochs, sampling params, reasoning effort, max tokens, concurrency); identical in the three dirs apart from `MODEL`.
+- `server_requirements.txt` / `client_requirements.txt` — `pip freeze` of the vLLM server environment and of the Inspect venv
+  that produce the results, with the host (GPUs, driver, CUDA, Python) in the header. Written after the final run; not present yet.
+- `local_orchestrator.sh` — runs everything in your local dev environment: starts `serve.sh` from the vLLM podman image (`VLLM_IMAGE`, by default the pinned one) or a venv (`VLLM_VENV`) through `tools/vllm_server.sh` (GPUs 0-7, port 8000, TP=2 x DP=4 from `serve.sh`, the HF cache and the task dir mounted in podman mode), waits for the server, activates the client venv (`INSPECT_VENV`), runs `run_eval.sh`, stops the server on exit.
   **This is the only file you should modify** to match the environment you run in.
 
 ## Run
 
 ### Setup (once per host)
 
-Create a server and a client environment as below. The commands use the paths that `local_orchestrator.sh` activates;
-if you keep the environments elsewhere, change the paths there. `server_requirements.txt` and
-`client_requirements.txt` are the exact `pip freeze` of the environments that produced the results below (Python 3.12,
-host details in their headers): installing from them reproduces those environments; the commented alternative gives an
-equivalent fresh install with the same pinned versions.
+Pull the server image and create the client environment as below. The commands use the default server image
+(`DEFAULT_VLLM_IMAGE`) and client venv path (`INSPECT_VENV`); if you keep them elsewhere, set those variables in the
+environment or change them in `local_orchestrator.sh`. Once the results are in, `server_requirements.txt`
+(`tools/vllm_server.sh` provides `vllm_freeze`, which prints `pip freeze` of the selected environment) and
+`client_requirements.txt` hold the exact packages that produced them (host details in their headers); create the
+client environment from its file instead. Use the same server and client environments for the three dirs of the
+comparison set.
 
 ```bash
-# server: vLLM 0.29.0 (CUDA 13 wheels; add the matching https://download.pytorch.org/whl/<cuXXX> index if pip cannot resolve torch)
-python3.12 -m venv ~/.venvs/vllm && source ~/.venvs/vllm/bin/activate
-pip install -r server_requirements.txt          # or: pip install vllm==0.29.0
+# server: the vLLM 0.32.0 podman image, docker.io/vllm/vllm-openai:v0.32.0 pinned by digest (the
+# DEFAULT_VLLM_IMAGE), the same image for the three dirs. 0.32.0 is the first release with the dense MXFP4-weight /
+# FP8-activation scheme the MXFP4xFP8 checkpoint needs; the humming-kernels dependency of its CUDA wheels provides the
+# only MXFP4 GEMM of that release that takes FP8 activations (CUDA, SM75+), so the comparison set needs an NVIDIA host.
+# GPU access from the container goes through the NVIDIA Container Toolkit's CDI spec (generated once per host, as root).
+podman pull docker.io/vllm/vllm-openai:v0.32.0@sha256:befccf0e7e4089aa23926bb6f887a85c0d46c2a99e6de5c5ffdf5cb7957c5b34
+sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+# To serve from a venv instead, create one with the vLLM version server_requirements.txt records (0.32.0, whose CUDA
+# wheels pull in humming-kernels) and pass it as VLLM_VENV; the image is the reference environment.
 # client: Inspect
 python3.12 -m venv ~/.venvs/inspect && source ~/.venvs/inspect/bin/activate
-pip install -r client_requirements.txt          # or:
-# pip install "inspect-evals==0.20.0" openai
+pip install "inspect-ai==0.3.263" "inspect-evals==0.20.0" "openai==3.14.0"
 ```
 
-Model weights and datasets are fetched from the Hugging Face Hub on first use into the usual cache (`HF_HOME`
-if set). Export `HF_TOKEN` in your shell before running (never in the repo): the dataset `Idavidrein/gpqa` is gated,
-accept its terms at https://huggingface.co/datasets/Idavidrein/gpqa with the account the token belongs to.
-Without a token, anonymous Hub downloads are rate-limited.
+Check `logs/serve.log` at start-up: `max_model_len` 262144, KV cache dtype `bfloat16`, and the default sampling
+params vLLM takes from the checkpoint's `generation_config.json` (temperature 1.0, top_p 0.95, top_k 20).
+
+`local_orchestrator.sh` serves the checkpoint from the Hugging Face Hub (`MODEL`) through the host's HF cache (`HF_HOME`,
+mounted into the container): download it there once with `hf download` and export `HF_HUB_OFFLINE=1`, or set
+`MODEL_PATH` there to serve a local copy instead. Export `HF_TOKEN` in your shell before running (never in the repo); the dataset `Idavidrein/gpqa` is gated, accept its terms at
+https://huggingface.co/datasets/Idavidrein/gpqa with the account the token belongs to.
 
 ### Run the eval
 
@@ -60,31 +75,23 @@ Always smoke-test first: `EPOCHS=1 ./local_orchestrator.sh --limit 5`
 
 ## Results
 
+Not run yet. `run_eval.sh` records the configuration below; fill the tables from the final `.eval` log (AGENTS.md,
+section 5), with sample errors counted as failures.
+
 With model generation config:
 
-`temperature=1.0, top_p=0.95, top_k=20, reasoning_effort=xhigh, max_tokens=131072, max_connections=128, client_timeout=7200, epochs=3 (mean)`
+`temperature=1.0, top_p=0.95, top_k=20, reasoning_effort=xhigh, max_tokens=131072, max_connections=128, client_timeout=7200, kv_cache_dtype=bfloat16, TP=2 DP=4, epochs=1`
 
 the following scores and token stats are obtained:
 
 | metric | value |
 |---|---|
-| accuracy (avg@3) | 0.9057 |
-| stderr | 0.0193 |
-| per-epoch accuracy | 0.899 / 0.909 / 0.909 |
-| samples | 594 (198 x 3 epochs) |
-| truncated (stop_reason=max_tokens) | 0 |
-| unparsed answers | 1 (model stopped after 53k reasoning tokens with an empty final answer) |
-| sample errors | 0 |
+| | |
 
 | tokens / sample | input | output | reasoning |
 |---|---|---|---|
-| mean | 316 | 13,255 | 12,947 |
-| median | 282 | 7,560 | 7,340 |
-| max | 2,844 | 98,187 | 97,907 |
-
-Total run time about 25 min on 8x H100 (128 concurrent samples).
+| | | | |
 
 ## Patches for upstream
 
 None.
-

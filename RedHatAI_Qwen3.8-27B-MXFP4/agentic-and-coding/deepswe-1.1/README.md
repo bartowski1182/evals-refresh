@@ -5,160 +5,136 @@
 | Task | `inspect_harbor/datacurve_deep_swe_1_1` (113 tasks, Harbor hub package digest `sha256:5affcd53…`, loaded through `assets/harbor_registry.json`, which pins the tasks to the fork commit carrying the verifier fix, see Patches) |
 | Category | agentic-and-coding (subclass: swe-agent) |
 | Exec tier | `agent` — one prebuilt Docker image per task (public.ecr.aws, 2 CPUs / 8 GB requested), bash/python tools, hidden test verifier |
-| vLLM recipe | https://recipes.vllm.ai/Qwen/Qwen3.8-27B (base model; the recipe has no MXFP4 variant) |
-| Model | https://huggingface.co/RedHatAI/Qwen3.8-27B-MXFP4 (revision `651eed9938`): W4A4 MXFP4 (compressed-tensors) |
+| vLLM recipe | https://recipes.vllm.ai/Qwen/Qwen3.8-27B (the base model's; its MXFP4 variant serves this checkpoint with the same flags) |
 | Task source | https://hub.harborframework.com/datasets/datacurve/deep-swe-1-1 |
 
-**Protocol note.** The task, agent and generation settings are those of `Qwen_Qwen3.8-27B/agentic-and-coding/deepswe-1.1`:
-- Inspect's generic ReAct agent (`bash`, `python`, `update_plan`, `submit`; 300 s tool timeout; automatic context
-  compaction; no message limit), not the Claude Code harness of the model card.
-- A single `--time-limit 14400` instead of Harbor's per-task agent budget.
-- Containers without Harbor's CPU cap (`override_cpus=0`) and with `inspect_harbor`'s 6 GB memory floor.
-- One epoch (pass@1); per-turn max_tokens 65536; sampling from the checkpoint's `generation_config.json` (identical to
-  the base model's); reasoning effort xhigh.
+**Protocol note.** The base model card reports DeepSWE with the Claude Code harness. `inspect_harbor` solves every
+task with Inspect's generic ReAct agent (`bash`, `python`, `update_plan`, `submit`; 300 s tool timeout; automatic
+context compaction; no message limit), not that harness; a single `--time-limit 14400` wall-clock guard is used,
+`override_cpus=0`, one epoch (pass@1), per-turn max_tokens 65536, one TP=8 replica so every turn of a sample hits one
+prefix cache. This dir is copied from the Qwen3.8-Flash-Next DeepSWE dir (AGENTS.md, section 11): the container runs
+without network, as every DeepSWE task declares for its agent and verifier (stock inspect_harbor 1.0 ignored that and
+ran with internet; see Patches), and the v1.1 task images keep no git history past the base commit. This dir is one of the three identical copies of the task that make up the Qwen3.8-27B comparison set (`Qwen_Qwen3.8-27B`, `RedHatAI_Qwen3.8-27B-MXFP4`, `RedHatAI_Qwen3.8-27B-MXFP4xFP8`): same task, agent, prompt, sampling, limits, concurrency, epochs (one, pass@1), vLLM release and serving topology, so the three numbers are like for like; only the checkpoint differs. The
+number is not comparable to the model card.
 
-What differs from the base run:
-- The KV cache is served in bf16 (`--kv-cache-dtype bfloat16`), although the checkpoint declares an FP8 KV-cache scheme,
-  so this run and `amd_Qwen3.8-27B-Quark-AWQ-MXFP4` differ only in the MXFP4 weights/activations.
-- The serving stack: AMD MI355X, vLLM 0.31.0 ROCm build, AITER W4A4 MXFP4 GEMM, Triton attention, `inspect-harbor`
-  1.0.0. The base ran on 8x H100 with vLLM 0.29.0 and `inspect-harbor` 0.7.6.
-- The base kept every turn of a sample on one prefix cache by serving from a single TP=8 replica, which does not start
-  here (see `local_orchestrator.sh`). Instead, the 113 tasks are split into 4 shards (tasks sorted by name; shard k
-  takes every 4th task from k, the same split for both models). Each shard is served by its own single-GPU vLLM server
-  (TP=1, DP=1) on GPUs 0-3, with 4-7 samples in flight per shard.
-
-The numbers are therefore not directly comparable to the model card (42.2 for the base model with Claude Code), and
-only roughly to the base run.
+**Checkpoint.** `RedHatAI/Qwen3.8-27B-MXFP4` is Qwen/Qwen3.8-27B with the linear layers' weights and input
+activations quantized to MXFP4 (W4A4, compressed-tensors format, group size 32), the MXFP4-activation counterpart of
+`RedHatAI/Qwen3.8-27B-MXFP4xFP8` (W4A8). The checkpoint also declares an FP8 KV-cache scheme, which vLLM would apply
+under its default `--kv-cache-dtype auto`; `serve.sh` overrides it with `bfloat16`, so the KV cache is BF16 as for the
+other two models and the three differ only in the linear layers' quantization. vLLM 0.32.0 is used for the three
+dirs (see Setup). Record the checkpoint revision and the MXFP4 kernel vLLM chose (`logs/serve.log`) here before the
+run.
 
 ## Files
 
-- `assets/harbor_registry.json` — Harbor registry entry pinning the 113 tasks to the fork commit that carries the verifier fix (see Patches).
-- `serve.sh` — deploys the model with a vLLM server. vLLM-serve arguments live here: parallelism, context length and
-  reasoning/tool parsers from the base model's recipe, plus the KV-cache dtype, attention backend and load strategy.
-- `run_eval.sh` — runs the Inspect task against that server. Inspect-side params live here (task and registry pin,
-  epochs, sampling params, per-turn max tokens, concurrency, sandbox count, time limit, CPU override, error threshold).
-- `server_requirements.txt` / `client_requirements.txt` — `pip freeze` of the vLLM container and of the
-  `inspect-harbor` 1.0 venv that produced the results below, with the image digest and host in the headers.
-- `local_orchestrator.sh` — runs everything in your local dev environment: starts `serve.sh` inside the vLLM ROCm
-  container (rootless podman), points Inspect's sandboxes at rootless Docker, waits for the server, activates the
-  Inspect venv, runs `run_eval.sh`, tears down. `LOG_DIR` puts the server log and the eval log side by side, so shards
-  don't collide. **This is the only file you should modify** to match the environment you run in.
+- `serve.sh` — deploys the model with a vLLM server. vLLM-serve arguments live here
+  (parallelism, context length, reasoning/tool parsers), taken from the Qwen/Qwen3.8-27B recipe, plus the BF16 KV cache; identical in the three dirs apart from
+  `MODEL`.
+- `run_eval.sh` — runs the Inspect task against that server. Inspect-side params live here
+  (task and registry pin, epochs, sampling params, per-turn max tokens, concurrency, sandbox count, time limit, CPU override, error threshold); identical in the three dirs apart from `MODEL`.
+- `assets/harbor_registry.json` — Harbor registry entry pinning the 113 tasks to the fork commit that carries the
+  verifier fix (see Patches).
+- `server_requirements.txt` / `client_requirements.txt` — `pip freeze` of the vLLM server environment and of the Inspect venv
+  that produce the results, with the host (GPUs, driver, CUDA, Python) in the header. Written after the final run; not present yet.
+- `local_orchestrator.sh` — runs everything in your local dev environment: starts `serve.sh` from the vLLM podman image (`VLLM_IMAGE`, by default the pinned one) or a venv (`VLLM_VENV`) through `tools/vllm_server.sh` (GPUs 0-7, port 8000, one TP=8 replica, the HF cache and the task dir mounted in podman mode), points Docker at the rootless daemon, waits for the server, activates the client venv (`INSPECT_VENV`), runs `run_eval.sh`, stops the server on exit.
+  **This is the only file you should modify** to match the environment you run in.
 
 ## Run
 
 ### Setup (once per host)
 
-The server runs from the official vLLM ROCm image, so it needs no venv. `local_orchestrator.sh` expects:
-- rootless podman and `numactl` for the server, with `/dev/kfd` and `/dev/dri` accessible to your user;
-- Docker with the compose plugin for the sandboxes. The orchestrator exports `DOCKER_HOST` for a rootless daemon
-  (`unix:///run/user/<uid>/docker.sock`, image store under `~/.local/share/docker`); with a rootful daemon, drop that
-  export.
-
-Rootless Docker needs a runc runtime with `NoNewKeyring` in `daemon.json`; otherwise each container takes one kernel key
-and exhausts a user's quota of 200. It cannot apply CPU limits, hence `-T override_cpus=0` in `run_eval.sh`.
-
-Create the client environment as below. The commands use the path that `local_orchestrator.sh` activates; if you keep
-it elsewhere, change the path there. `client_requirements.txt` is the exact `pip freeze` that produced the results
-below.
+Pull the server image and create the client environment as below. The commands use the default server image
+(`DEFAULT_VLLM_IMAGE`) and client venv path (`INSPECT_VENV`); if you keep them elsewhere, set those variables in the
+environment or change them in `local_orchestrator.sh`. Once the results are in, `server_requirements.txt`
+(`tools/vllm_server.sh` provides `vllm_freeze`, which prints `pip freeze` of the selected environment) and
+`client_requirements.txt` hold the exact packages that produced them (host details in their headers); create the
+client environment from its file instead. Use the same server and client environments for the three dirs of the
+comparison set.
 
 ```bash
-# server: vLLM 0.31.0 ROCm image (digest in server_requirements.txt)
-podman pull docker.io/vllm/vllm-openai-rocm:v0.31.0
-# client: Inspect + inspect-harbor 1.0 (no harbor/litellm dependency, so no openai pin conflict)
-python3.12 -m venv ~/.venvs/inspect-harbor-1.0 && source ~/.venvs/inspect-harbor-1.0/bin/activate
-pip install -r client_requirements.txt          # or:
-# pip install "inspect-harbor==1.0.0" "inspect_ai==0.3.264" httpx2 "openai==3.14.0"
+# server: the vLLM 0.32.0 podman image, docker.io/vllm/vllm-openai:v0.32.0 pinned by digest (the
+# DEFAULT_VLLM_IMAGE), the same image for the three dirs. 0.32.0 is the first release with the dense MXFP4-weight /
+# FP8-activation scheme the MXFP4xFP8 checkpoint needs; the humming-kernels dependency of its CUDA wheels provides the
+# only MXFP4 GEMM of that release that takes FP8 activations (CUDA, SM75+), so the comparison set needs an NVIDIA host.
+# GPU access from the container goes through the NVIDIA Container Toolkit's CDI spec (generated once per host, as root).
+podman pull docker.io/vllm/vllm-openai:v0.32.0@sha256:befccf0e7e4089aa23926bb6f887a85c0d46c2a99e6de5c5ffdf5cb7957c5b34
+sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+# To serve from a venv instead, create one with the vLLM version server_requirements.txt records (0.32.0, whose CUDA
+# wheels pull in humming-kernels) and pass it as VLLM_VENV; the image is the reference environment.
+# client: Inspect + the inspect_harbor fork that enforces the tasks' network policy (see Patches). Install the fork
+# by commit with --no-deps on top of the release's dependencies: its pyproject's uv exclude-newer breaks a resolving
+# install, and a local-directory install records no commit in pip freeze.
+python3.12 -m venv ~/.venvs/inspect-harbor-fix && source ~/.venvs/inspect-harbor-fix/bin/activate
+pip install "inspect-harbor==1.0.0" httpx2
+pip install --no-deps "inspect_harbor @ git+https://github.com/eldarkurtic/inspect_harbor@cb6192598173009fd637e12cf5ec603c3c341359"
+pip install "openai==3.14.0"
 ```
 
-Model weights are fetched from the Hugging Face Hub on first use into `~/.cache/huggingface` (or `HF_HOME`), which the
-orchestrator mounts into the container. Nothing here is gated; export `HF_TOKEN` (never in the repo) to avoid the Hub's
-anonymous rate limits. The 113 task images (about 122 GB, sharing most layers) come from public.ecr.aws, which throttles
-bursts: pre-pull them one by one with `docker pull` before the first run.
+Check `logs/serve.log` at start-up: the quantization method must be `compressed-tensors`, the log must name the MXFP4
+kernel (`Using <Kernel> for MXFP4 GEMM`), the KV cache dtype must be `bfloat16` (the checkpoint's FP8 KV scheme is
+overridden), and the default sampling params vLLM takes from the checkpoint's `generation_config.json` must be
+temperature 1.0, top_p 0.95, top_k 20.
+
+Docker with the compose plugin (v2.x or later) is required for the sandboxes (podman serves the model only).
+`local_orchestrator.sh` exports `DOCKER_HOST` for a rootless daemon (`unix:///run/user/<uid>/docker.sock`); with a
+rootful daemon drop that export. Rootless Docker needs
+a runc runtime with `NoNewKeyring` in `daemon.json` (one kernel key per container otherwise exhausts a user's quota of
+200) and cannot apply CPU limits, hence `-T override_cpus=0` in `run_eval.sh`. Check the image-store disk space before
+the first run (see `local_env_notes.md`).
+
+Inspect builds a task's image before its first sample if it is missing (serially, before any sample starts). If you
+pre-built the `hb__<hash>` images, pass `--sandbox-prebuilt` to skip that step. The 113 task images (about 122 GB)
+come from ECR public (`public.ecr.aws/d3j8x8q7/swe-bench-202605`, the v1.1 tags), which throttles bursts; pull them
+ahead of time, one at a time. After the run, check that the sample containers had no route out (AGENTS.md, section
+11): any successful outbound request means the fork is not active.
+`local_orchestrator.sh` serves the checkpoint from the Hugging Face Hub (`MODEL`) through the host's HF cache (`HF_HOME`,
+mounted into the container): download it there once with `hf download` and export `HF_HUB_OFFLINE=1`, or set
+`MODEL_PATH` there to serve a local copy instead. Export `HF_TOKEN` in your shell before running (never in the repo); the Harbor task files are fetched from GitHub at the pinned commit.
 
 ### Run the eval
 
-Single server (all 8 GPUs behind one endpoint), as the scripts default to:
-
 ```bash
-./local_orchestrator.sh
+./local_orchestrator.sh                  # add --sandbox-prebuilt if the task images are pre-built
 inspect view --log-dir ./logs
 ```
 
-The results below come from 4 single-GPU shards, run on GPUs 0-3 next to the AMD model's 4 shards on GPUs 4-7:
-
-```bash
-for k in 0 1 2 3; do
-  names=$(python3 -c "import json; e=json.load(open('assets/harbor_registry.json')); e=e[0] if isinstance(e,list) else e; print(json.dumps(['*'+t for t in sorted(x['name'] for x in e['tasks'])[$k::4]]))")
-  GPUS=$k DP=1 PORT=$((8000+k)) LOG_DIR=./logs/shard$k MAX_CONNECTIONS=7 MAX_SANDBOXES=7 FAIL_ON_ERROR=0.25 \
-    ./local_orchestrator.sh -T "dataset_task_names=$names" &
-done; wait
-```
-
-Always smoke-test first: `EPOCHS=1 ./local_orchestrator.sh --limit 2`. An interrupted shard is resumed with
-`inspect eval-retry logs/shard<k>/<file>.eval` against a server started the same way; it keeps the finished samples and
-reruns the unfinished and errored ones.
+Always smoke-test first: `./local_orchestrator.sh --limit 2`
 
 ## Results
 
+Not run yet. `run_eval.sh` records the configuration below; fill the tables from the final `.eval` log (AGENTS.md,
+section 5) after the leak audit of section 11, with sample errors counted as failures.
+
 With model generation config:
 
-`temperature=1.0, top_p=0.95, top_k=20, reasoning_effort=xhigh, max_tokens=65536 (per turn), no message limit, time_limit=14400s, client_timeout=7200, tool_timeout=300s, override_cpus=0, epochs=1; kv_cache_dtype=bfloat16, attention_backend=TRITON_ATTN, vLLM 0.31.0 (ROCm); 4 shards x 1 MI355X (TP=1, DP=1), 7 samples in flight per shard, fail_on_error=0.25 per shard; the run was interrupted by a host crash after 84 of 113 samples and resumed with inspect eval-retry at 4 samples in flight per shard (raised to 5-6 on two shards once others had drained), which reran the 29 unfinished and 10 errored samples`
+`temperature=1.0, top_p=0.95, top_k=20, reasoning_effort=xhigh, max_tokens=65536 (per turn), no message limit, max_connections=48, max_sandboxes=48, time_limit=14400s, client_timeout=7200, tool_timeout=300s, override_cpus=0, kv_cache_dtype=bfloat16, TP=8 DP=1, epochs=1`
 
 the following scores and token stats are obtained:
 
 | metric | value |
 |---|---|
-| resolved rate (pass@1, 1 epoch, all 113 tasks; sample errors count as unresolved) | 0.336 (38 of 113) |
-| stderr (binomial) | 0.0446 |
-| mean partial score (fraction of required tests passing, grader's `partial`; sample errors count as 0) | 0.822 |
-| samples | 113 of 113 tasks, 1 epoch |
-| time-limit hits (14400 s) | 0 |
-| samples whose agent never committed (no `model.patch`, graded as the base state) | 0 |
-| turns truncated at max_tokens | 3 |
-| context compactions | 146 |
-| sample errors (scored as unresolved; all `Compaction insufficient`) | 15 (anko-default-function-arguments, arktype-json-schema-refs-dependencies, katex-multicolumn-array-spans, koota-composite-trait-aspects, langchain-request-coalescing, opa-template-string-reconstruction, pebble-durability-wait-apis, scriggo-method-declarations, sqlfmt-create-table-ddl-formatting, tomlkit-toml-table-converters, valibot-recursive-schema-composition, wasmi-trap-coredumps, yaegi-go-embed-directives, yjs-map-conflict-detection, ytt-jsonpath-query-api) |
+| | |
 
 | tokens / sample | input | output | reasoning |
 |---|---|---|---|
-| mean | 17,369,772 | 164,946 | 120,578 |
-| median | 16,874,188 | 142,938 | 99,214 |
-| max | 45,847,730 | 703,969 | 601,924 |
-
-Input tokens are cumulative over agent turns (history is resent each turn). Agent turns per sample: median 149, mean
-221, max 1,351. Wall time per sample: median 3,907 s, mean 4,091 s, max 13,288 s. The agent ends when the model replies
-without a tool call; the verifier then collects `git diff <base> HEAD` as `model.patch` and grades it, so only committed
-work counts. Total run time 4 h 12 min (until the crash) + 4 h 28 min (resume) on 4x MI355X.
-
-Per language (resolved / tasks): go 16/34, typescript 10/35, python 9/34, rust 2/5, javascript 1/5.
-
-All 15 sample errors are Inspect's `RuntimeError: Compaction insufficient`. After hundreds of agent turns, the agent's
-own messages exceed the compaction threshold of 90% of the 262k context, and Inspect stops the sample with an error
-instead of grading the committed state. They are scored as unresolved, so that every model is scored on the
-same 113 tasks (excluding them would also flatter the score: these are the longest, unfinished trajectories).
+| | | | |
 
 ## Patches for upstream
 
-- `inspect_harbor` up to 0.7.5 ignored the `[[verifier.collect]]` hook every DeepSWE task declares (the
-  `git diff --binary <base_commit> HEAD > /logs/artifacts/model.patch` that the grader applies in a `separate`
-  verifier environment) and graded the pristine base state. Fixed upstream in
-  https://github.com/meridianlabs-ai/inspect_harbor/pull/155 (0.7.6): the hook runs in the agent container, the
-  repository is reset to the base commit and `tests/test.sh` runs there (the verifier image is the task image plus
-  the test files, so the approximation only differs in untracked state, which the reset removes). Only committed
-  work is graded, as the task instructions state.
-- vitest sizes its worker pool from the visible CPU count (384 here; Harbor's `cpus = 2` is a quota and does not
-  change the count), the workers exhaust the task's 8 GB memory cap and the run is OOM-killed, so every test is
-  "missing from report" on six tasks (dynamodb-toolbox x2, effect, meriyah, superjson, true-myth). Fixed by making
-  the shared verifier frame re-execute itself under `taskset` on a random 4-core slice; upstream:
-  https://github.com/datacurve-ai/deep-swe/pull/100.
-- `inspect_harbor` 0.7.x ran the verifier as `bash -l /tests/test.sh`; `/etc/profile` in these images drops the
-  project virtualenv from `PATH`, so `pytest` is "missing" (igel-persist-feature-schema). Fixed upstream in
-  inspect_harbor 1.0.0 (https://github.com/meridianlabs-ai/inspect_harbor/pull/174).
-
-This directory consumes the dataset fix from the fork: `assets/harbor_registry.json` pins the 113 tasks of the hub
-package to commit `89080fcd34` of https://github.com/eldarkurtic/deep-swe (branch `fix/verifier-cpu-affinity`, the
-content of PR #100), and `run_eval.sh` loads it with `inspect_harbor/harbor -T registry_path=... -T
-dataset_name_version=deep-swe-1-1@1.1`. The results below were produced with exactly this setup and `inspect-harbor`
-1.0.0, which carries the other two fixes. It was checked with `--solver inspect_harbor/oracle` on
-abs-module-cache-flags (Go), dynamodb-toolbox-lazy-recursive-schemas (the vitest fix) and igel-persist-feature-schema
-(the `PATH` fix): 3/3 resolved, `model.patch` collected and applied. Once PR #100 is merged and the hub package
-republished, switch back to `inspect_harbor/datacurve_deep_swe_1_1 -T ref=<digest>` and delete the registry file.
+- **The task's own network policy was not enforced.** Every DeepSWE `task.toml` declares `[agent]` and `[verifier]`
+  `network_mode = "no-network"`, but inspect_harbor 1.0 reads network policy only from `[environment]`, so agents get
+  public internet. Fixed on branch [`fix/enforce-agent-network-mode`](https://github.com/eldarkurtic/inspect_harbor/tree/fix/enforce-agent-network-mode)
+  of https://github.com/eldarkurtic/inspect_harbor (commit `cb61925`, on top of v1.0.0), which applies `[agent]` and
+  `[verifier]` `network_mode` per phase; with both denied, the container runs with `network_mode: none` throughout.
+  The client venv installs inspect_harbor from that commit. Upstream PR:
+  [meridianlabs-ai/inspect_harbor#200](https://github.com/meridianlabs-ai/inspect_harbor/pull/200).
+- **Git history.** The v1.1 task images (`public.ecr.aws/d3j8x8q7/swe-bench-202605:<id>-v1.1`) are built from the
+  tasks' `environment/Dockerfile`, which keeps only the base commit's history (all 113 checked in the
+  Qwen3.8-Flash-Next run: every ref reachable from `HEAD`, no unreachable commits). The v1.0 images keep future
+  `origin/*` refs; do not use them.
+- Carried over from the earlier DeepSWE dirs and consumed here: the `[[verifier.collect]]` hook (inspect_harbor
+  0.7.6, meridianlabs-ai/inspect_harbor#155), the vitest worker-pool OOM fixed with `taskset` in the pinned fork
+  commit `89080fcd34` of https://github.com/eldarkurtic/deep-swe (datacurve-ai/deep-swe#100), and the verifier's
+  non-login shell (inspect_harbor 1.0). `assets/harbor_registry.json` pins the 113 tasks to that commit; once PR #100
+  is merged and the hub package republished, switch back to `inspect_harbor/datacurve_deep_swe_1_1 -T ref=<digest>`
+  and delete the registry file.

@@ -8,53 +8,72 @@
 | vLLM recipe | https://recipes.vllm.ai/Qwen/Qwen3.8-27B |
 | Task source | https://github.com/sierra-research/tau2-bench (data vendored by inspect_evals 0.20.0) |
 
-**Protocol note.** Neither model card reports tau2/tau3-bench. This is inspect_evals's native re-implementation of
+**Protocol note.** No model card reports tau2/tau3-bench. This is inspect_evals's native re-implementation of
 tau2-bench: the agent gets the domain policy as system prompt and the domain tools as Python tools, a user
 simulator (Inspect model role `user`, temperature 0 as upstream; Qwen/Qwen3.8-27B for every model of this repo,
 a fixed simulator as on the tau-bench leaderboards) plays the customer from the task's scenario, and a task
 passes when the final database state matches the expected one and the required information was communicated
 (the airline natural-language assertions of upstream are not graded by this implementation; banking uses the
 `grep` knowledge-retrieval configuration rather than the leaderboard's `alltools`). The agent samples with the
-model's own generation config instead of upstream's temperature 0 (see Patches). Up to 100 user/agent
-exchanges per task. One epoch (pass^1) instead of the repo's usual avg@3. The same vLLM server also plays the user simulator (Inspect model role `user`). The numbers are therefore not
-comparable to taubench.com; the Harbor-package run in `../tau3-bench` is the same task set through the
-original tau2-bench runtime.
+model's own generation config instead of upstream's temperature 0. Up to 100 user/agent exchanges per task. One
+epoch (pass^1). A second vLLM server (GPUs 4-7, TP=4) serves Qwen/Qwen3.8-27B as the user simulator while the model
+under test runs on GPUs 0-3 (TP=4), in all three dirs (the Gemma pattern), so the simulator is served identically
+for the three models and a quantized model never plays its own customer. This dir is one of the three identical copies of the task that make up the Qwen3.8-27B comparison set (`Qwen_Qwen3.8-27B`, `RedHatAI_Qwen3.8-27B-MXFP4`, `RedHatAI_Qwen3.8-27B-MXFP4xFP8`): same task, agent, prompt, sampling, limits, concurrency, epochs (one, pass@1), vLLM release and serving topology, so the three numbers are like for like; only the checkpoint differs. The numbers are not comparable to
+taubench.com; the Harbor-package run in `../tau3-bench` is the same task set through the original tau2-bench runtime.
+
+**Checkpoint.** `Qwen/Qwen3.8-27B` is the BF16 base model of the comparison set, the reference the two RedHatAI
+quantized checkpoints are measured against. The KV cache is BF16 (`--kv-cache-dtype bfloat16`, this checkpoint's
+default, spelled out so that the three `serve.sh` are identical), and vLLM 0.32.0 is used for the three dirs (see
+Setup). Record the checkpoint revision here before the run.
 
 ## Files
 
 - `serve.sh` — deploys the model with a vLLM server. vLLM-serve arguments live here
-  (parallelism, context length, reasoning/tool parsers), taken from the official recipe.
-- `run_eval.sh` — runs the four Inspect tasks against that server. Inspect-side params live here
-  (tasks, user-simulator role, epochs, sampling params, per-turn max tokens, time limit, concurrency).
-- `server_requirements.txt` / `client_requirements.txt` — `pip freeze` of the vLLM and Inspect
-  venvs that produced the results below.
-- `local_orchestrator.sh` — runs everything in your local dev environment: activates the
-  venvs, sets GPUs and TP/DP, starts the server(s) in the background, runs `run_eval.sh`, tears down.
+  (parallelism, context length, reasoning/tool parsers), taken from the Qwen/Qwen3.8-27B recipe, plus the BF16 KV cache; identical in the three dirs apart from
+  `MODEL`.
+- `run_eval.sh` — runs the Inspect task against that server. Inspect-side params live here
+  (tasks, user-simulator role, epochs, sampling params, per-turn max tokens, time limit, concurrency); identical in the three dirs apart from `MODEL`.
+- `assets/serve_user_model.sh` — vLLM server for the Qwen/Qwen3.8-27B user simulator on a second port (recipe flags),
+  started by `local_orchestrator.sh`.
+- `server_requirements.txt` / `client_requirements.txt` — `pip freeze` of the vLLM server environment and of the Inspect venv
+  that produce the results, with the host (GPUs, driver, CUDA, Python) in the header. Written after the final run; not present yet.
+- `local_orchestrator.sh` — runs everything in your local dev environment: starts `serve.sh` (GPUs 0-3) and `assets/serve_user_model.sh` (GPUs 4-7) from the vLLM podman image (`VLLM_IMAGE`, by default the pinned one) or a venv (`VLLM_VENV`) through `tools/vllm_server.sh`, one TP=4 replica each, with the HF cache and the task dir mounted in podman mode, waits for both, activates the client venv (`INSPECT_VENV`), runs `run_eval.sh`, stops the servers on exit.
   **This is the only file you should modify** to match the environment you run in.
 
 ## Run
 
 ### Setup (once per host)
 
-Create a server and a client environment as below. The commands use the paths that `local_orchestrator.sh` activates;
-if you keep the environments elsewhere, change the paths there. `server_requirements.txt` and
-`client_requirements.txt` are the exact `pip freeze` of the environments that produced the results below (Python 3.12,
-host details in their headers): installing from them reproduces those environments; the commented alternative gives an
-equivalent fresh install with the same pinned versions.
+Pull the server image and create the client environment as below. The commands use the default server image
+(`DEFAULT_VLLM_IMAGE`) and client venv path (`INSPECT_VENV`); if you keep them elsewhere, set those variables in the
+environment or change them in `local_orchestrator.sh`. Once the results are in, `server_requirements.txt`
+(`tools/vllm_server.sh` provides `vllm_freeze`, which prints `pip freeze` of the selected environment) and
+`client_requirements.txt` hold the exact packages that produced them (host details in their headers); create the
+client environment from its file instead. Use the same server and client environments for the three dirs of the
+comparison set.
 
 ```bash
-# server: vLLM 0.29.0 (CUDA 13 wheels; add the matching https://download.pytorch.org/whl/<cuXXX> index if pip cannot resolve torch)
-python3.12 -m venv ~/.venvs/vllm && source ~/.venvs/vllm/bin/activate
-pip install -r server_requirements.txt          # or: pip install vllm==0.29.0
-# client: Inspect
+# server: the vLLM 0.32.0 podman image, docker.io/vllm/vllm-openai:v0.32.0 pinned by digest (the
+# DEFAULT_VLLM_IMAGE), the same image for the three dirs. 0.32.0 is the first release with the dense MXFP4-weight /
+# FP8-activation scheme the MXFP4xFP8 checkpoint needs; the humming-kernels dependency of its CUDA wheels provides the
+# only MXFP4 GEMM of that release that takes FP8 activations (CUDA, SM75+), so the comparison set needs an NVIDIA host.
+# GPU access from the container goes through the NVIDIA Container Toolkit's CDI spec (generated once per host, as root).
+podman pull docker.io/vllm/vllm-openai:v0.32.0@sha256:befccf0e7e4089aa23926bb6f887a85c0d46c2a99e6de5c5ffdf5cb7957c5b34
+sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+# To serve from a venv instead, create one with the vLLM version server_requirements.txt records (0.32.0, whose CUDA
+# wheels pull in humming-kernels) and pass it as VLLM_VENV; the image is the reference environment.
+# client: Inspect + inspect_evals
 python3.12 -m venv ~/.venvs/inspect && source ~/.venvs/inspect/bin/activate
-pip install -r client_requirements.txt          # or:
-# pip install "inspect-evals==0.20.0" openai
+pip install "inspect-ai==0.3.263" "inspect-evals==0.20.0" "openai==3.14.0"
 ```
 
-Model weights and datasets are fetched from the Hugging Face Hub on first use into the usual cache (`HF_HOME`
-if set). Export `HF_TOKEN` in your shell before running (never in the repo); nothing here is gated, but anonymous Hub
-downloads are rate-limited.
+Check `logs/serve.log` at start-up: `max_model_len` 262144, KV cache dtype `bfloat16`, and the default sampling
+params vLLM takes from the checkpoint's `generation_config.json` (temperature 1.0, top_p 0.95, top_k 20).
+
+No Docker needed. The user-simulator server needs the Qwen/Qwen3.8-27B weights (BF16, about 55 GB) in the same cache.
+`local_orchestrator.sh` serves the checkpoint from the Hugging Face Hub (`MODEL`) through the host's HF cache (`HF_HOME`,
+mounted into the container): download it there once with `hf download` and export `HF_HUB_OFFLINE=1`, or set
+`MODEL_PATH` there to serve a local copy instead. Export `HF_TOKEN` in your shell before running (never in the repo); nothing here is gated, but anonymous Hub downloads are rate-limited.
 
 ### Run the eval
 
@@ -65,36 +84,24 @@ inspect view --log-dir ./logs
 
 Always smoke-test first: `EPOCHS=1 ./local_orchestrator.sh --limit 2`
 
-No Docker needed.
-
 ## Results
+
+Not run yet. `run_eval.sh` records the configuration below; fill the tables from the final `.eval` log (AGENTS.md,
+section 5), with sample errors counted as failures.
 
 With model generation config:
 
-`temperature=1.0, top_p=0.95, top_k=20, reasoning_effort=xhigh, max_tokens=65536 (per turn), time_limit=3600s, client_timeout=7200, up to 100 user/agent exchanges (task default), TP=8 DP=1, epochs=1; user simulator vllm/Qwen/Qwen3.8-27B at temperature 0 on the same server; 375 tasks in one run of the four domain tasks at 56 samples in flight`
+`temperature=1.0, top_p=0.95, top_k=20, reasoning_effort=xhigh, max_tokens=65536 (per turn), time_limit=3600s, client_timeout=7200, up to 100 user/agent exchanges (task default), kv_cache_dtype=bfloat16, TP=4 DP=1 on GPUs 0-3, epochs=1; user simulator vllm/Qwen/Qwen3.8-27B at temperature 0 on a second server (GPUs 4-7, TP=4); 56 samples in flight`
 
 the following scores and token stats are obtained:
 
 | metric | value |
 |---|---|
-| pass^1 over all domains (task-weighted mean, 375 tasks) | 0.699 (262 of 375) |
-| stderr (binomial) | 0.0237 |
-| pass^1 airline | 0.660 (33 of 50) |
-| pass^1 retail | 0.816 (93 of 114) |
-| pass^1 telecom | 0.904 (103 of 114) |
-| pass^1 banking | 0.340 (33 of 97) |
-| samples | 375 of 375 tasks, 1 epoch |
-| sample errors (excluded from the score) | 0 |
+| | |
 
-| agent tokens / sample | input | output | reasoning |
+| tokens / sample | input | output | reasoning |
 |---|---|---|---|
-| mean | 626,879 | 6,040 | 4,038 |
-| median | 134,008 | 3,880 | 2,763 |
-| max | 48,616,781 | 72,116 | 30,780 |
-
-Agent tokens exclude the user-simulator model's calls. Input tokens are cumulative over agent turns (history is
-resent each turn). Agent model calls per sample: median 15, mean 20, max 361. Wall time per
-sample: median 196 s, mean 347 s, max 3,600 s. Total run time 1 h 40 min on 8x H100.
+| | | | |
 
 ## Patches for upstream
 

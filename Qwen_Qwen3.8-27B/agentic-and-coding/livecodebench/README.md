@@ -2,57 +2,81 @@
 
 | | |
 |---|---|
-| Task | `inspect_harbor/livecodebench` (100 tasks sampled from LiveCodeBench release_v6) |
+| Task | `inspect_harbor/livecodebench` (100 tasks sampled from LiveCodeBench release_v6, loaded through `assets/harbor_registry.json`, see Patches) |
 | Category | agentic-and-coding (subclass: code-gen) |
 | Exec tier | `agent` — Docker container per task, bash/python tools, hidden-test verifier |
 | vLLM recipe | https://recipes.vllm.ai/Qwen/Qwen3.8-27B |
 | Task source | https://hub.harborframework.com/datasets/livecodebench/livecodebench |
 
-**Protocol note.** The model card's "LiveCodeBench v6" is single-shot pass@1 over the full
-release_v6 set (1,055 problems). This task is a fixed 100-problem sample solved agentically
-(the model can run public tests and iterate). The two numbers are not comparable.
+**Protocol note.** The base model card's "LiveCodeBench v6" is single-shot pass@1 over the full release_v6 set
+(1,055 problems). This task is a fixed 100-problem sample solved agentically (the model can run public tests and
+iterate) with Inspect's generic ReAct agent, per-turn max_tokens 65536, `--time-limit 3600`, `override_cpus=0`, one
+epoch (pass@1), so the two numbers are not comparable. This dir is one of the three identical copies of the task that make up the Qwen3.8-27B comparison set (`Qwen_Qwen3.8-27B`, `RedHatAI_Qwen3.8-27B-MXFP4`, `RedHatAI_Qwen3.8-27B-MXFP4xFP8`): same task, agent, prompt, sampling, limits, concurrency, epochs (one, pass@1), vLLM release and serving topology, so the three numbers are like for like; only the checkpoint differs. The tasks set no network policy, so the agent has
+internet: audit the trajectories for lookups of published solutions (AGENTS.md, section 11).
+
+**Checkpoint.** `Qwen/Qwen3.8-27B` is the BF16 base model of the comparison set, the reference the two RedHatAI
+quantized checkpoints are measured against. The KV cache is BF16 (`--kv-cache-dtype bfloat16`, this checkpoint's
+default, spelled out so that the three `serve.sh` are identical), and vLLM 0.32.0 is used for the three dirs (see
+Setup). Record the checkpoint revision here before the run.
 
 ## Files
 
-- `assets/harbor_registry.json` — Harbor registry entry for `livecodebench@6.0` pinned to a commit that
-  carries our upstream fixes (see Patches); `run_eval.sh` loads the dataset from it.
 - `serve.sh` — deploys the model with a vLLM server. vLLM-serve arguments live here
-  (parallelism, context length, reasoning/tool parsers), taken from the official recipe.
+  (parallelism, context length, reasoning/tool parsers), taken from the Qwen/Qwen3.8-27B recipe, plus the BF16 KV cache; identical in the three dirs apart from
+  `MODEL`.
 - `run_eval.sh` — runs the Inspect task against that server. Inspect-side params live here
-  (task, epochs, sampling params, reasoning effort, per-turn max tokens, concurrency, sandbox count, time limit).
-- `server_requirements.txt` / `client_requirements.txt` — `pip freeze` of the vLLM and Inspect
-  venvs that produced the results below. The client venv is the `inspect-harbor` one (see Run, Setup).
-- `local_orchestrator.sh` — runs everything in your local dev environment: activates the
-  venvs, sets GPUs, starts `serve.sh` in the background, runs `run_eval.sh`, tears down.
+  (task and dataset pin, epochs, sampling params, reasoning effort, per-turn max tokens, concurrency, sandbox count, time limit); identical in the three dirs apart from `MODEL`.
+- `assets/harbor_registry.json` — Harbor registry entry for `livecodebench@6.0` pinned to a commit that carries our
+  upstream fixes (see Patches); `run_eval.sh` loads the dataset from it.
+- `server_requirements.txt` / `client_requirements.txt` — `pip freeze` of the vLLM server environment and of the Inspect venv
+  that produce the results, with the host (GPUs, driver, CUDA, Python) in the header. Written after the final run; not present yet.
+- `local_orchestrator.sh` — runs everything in your local dev environment: starts `serve.sh` from the vLLM podman image (`VLLM_IMAGE`, by default the pinned one) or a venv (`VLLM_VENV`) through `tools/vllm_server.sh` (GPUs 0-7, port 8000, TP=2 x DP=4 from `serve.sh`, the HF cache and the task dir mounted in podman mode), points Docker at the rootless daemon, waits for the server, activates the client venv (`INSPECT_VENV`), runs `run_eval.sh`, stops the server on exit.
   **This is the only file you should modify** to match the environment you run in.
 
 ## Run
 
 ### Setup (once per host)
 
-Create a server and a client environment as below. The commands use the paths that `local_orchestrator.sh` activates;
-if you keep the environments elsewhere, change the paths there. `server_requirements.txt` and `client_requirements.txt`
-are the exact `pip freeze` of the environments that produced the results below (Python 3.12, host details in their
-headers): installing from them reproduces those environments; the commented alternative gives an equivalent fresh
-install with the same pinned versions.
+Pull the server image and create the client environment as below. The commands use the default server image
+(`DEFAULT_VLLM_IMAGE`) and client venv path (`INSPECT_VENV`); if you keep them elsewhere, set those variables in the
+environment or change them in `local_orchestrator.sh`. Once the results are in, `server_requirements.txt`
+(`tools/vllm_server.sh` provides `vllm_freeze`, which prints `pip freeze` of the selected environment) and
+`client_requirements.txt` hold the exact packages that produced them (host details in their headers); create the
+client environment from its file instead. Use the same server and client environments for the three dirs of the
+comparison set.
 
 ```bash
-# server: vLLM 0.29.0 (CUDA 13 wheels; add the matching https://download.pytorch.org/whl/<cuXXX> index if pip cannot resolve torch)
-python3.12 -m venv ~/.venvs/vllm && source ~/.venvs/vllm/bin/activate
-pip install -r server_requirements.txt          # or: pip install vllm==0.29.0
-# client: Inspect
+# server: the vLLM 0.32.0 podman image, docker.io/vllm/vllm-openai:v0.32.0 pinned by digest (the
+# DEFAULT_VLLM_IMAGE), the same image for the three dirs. 0.32.0 is the first release with the dense MXFP4-weight /
+# FP8-activation scheme the MXFP4xFP8 checkpoint needs; the humming-kernels dependency of its CUDA wheels provides the
+# only MXFP4 GEMM of that release that takes FP8 activations (CUDA, SM75+), so the comparison set needs an NVIDIA host.
+# GPU access from the container goes through the NVIDIA Container Toolkit's CDI spec (generated once per host, as root).
+podman pull docker.io/vllm/vllm-openai:v0.32.0@sha256:befccf0e7e4089aa23926bb6f887a85c0d46c2a99e6de5c5ffdf5cb7957c5b34
+sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+# To serve from a venv instead, create one with the vLLM version server_requirements.txt records (0.32.0, whose CUDA
+# wheels pull in humming-kernels) and pass it as VLLM_VENV; the image is the reference environment.
+# client: Inspect + inspect_harbor
 python3.12 -m venv ~/.venvs/inspect-harbor && source ~/.venvs/inspect-harbor/bin/activate
-pip install -r client_requirements.txt          # or:
-# pip install "inspect-harbor==0.7.5" httpx2 "openai==3.14.0"
+pip install "inspect-harbor==1.0.0" httpx2 && pip install "openai==3.14.0"
 ```
 
-`inspect-harbor` pulls in `litellm`, which pins `openai<3`, while Inspect's OpenAI-compatible providers need
-`openai>=3`; installing `openai==3.14.0` last overrides the pin (pip prints a conflict warning that is harmless
-here because Inspect's agent path never imports `litellm`). `httpx2` is imported by `inspect-ai` but not declared.
+Check `logs/serve.log` at start-up: `max_model_len` 262144, KV cache dtype `bfloat16`, and the default sampling
+params vLLM takes from the checkpoint's `generation_config.json` (temperature 1.0, top_p 0.95, top_k 20).
 
-Model weights and datasets are fetched from the Hugging Face Hub on first use into the usual cache (`HF_HOME`
-if set). Export `HF_TOKEN` in your shell before running (never in the repo); nothing here is gated, but anonymous Hub
-downloads are rate-limited.
+Docker with the compose plugin (v2.x or later) is required for the sandboxes (podman serves the model only).
+`local_orchestrator.sh` exports `DOCKER_HOST` for a rootless daemon (`unix:///run/user/<uid>/docker.sock`); with a
+rootful daemon drop that export. Rootless Docker needs
+a runc runtime with `NoNewKeyring` in `daemon.json` (one kernel key per container otherwise exhausts a user's quota of
+200) and cannot apply CPU limits, hence `-T override_cpus=0` in `run_eval.sh`. Check the image-store disk space before
+the first run (see `local_env_notes.md`).
+
+**What to expect on the first run:** Harbor fetches the 100 task files from GitHub at the pinned commit, then Inspect
+builds one image per task, one after another, before any sample starts (with the pinned Dockerfile fix the apt layer
+is shared: about 1 minute and 2 GB in total). Later runs reuse the images; pass `--sandbox-prebuilt` to skip the
+check. During image builds `inspect ctl` reports no running eval; watch the eval output instead.
+`local_orchestrator.sh` serves the checkpoint from the Hugging Face Hub (`MODEL`) through the host's HF cache (`HF_HOME`,
+mounted into the container): download it there once with `hf download` and export `HF_HUB_OFFLINE=1`, or set
+`MODEL_PATH` there to serve a local copy instead. Export `HF_TOKEN` in your shell before running (never in the repo); the Harbor task files are fetched from GitHub at the pinned commit.
 
 ### Run the eval
 
@@ -63,65 +87,35 @@ inspect view --log-dir ./logs
 
 Always smoke-test first: `EPOCHS=1 ./local_orchestrator.sh --limit 2`
 
-Requires Docker. **What to expect on the first run:** Harbor downloads the 100 tasks into
-`~/.cache/harbor/tasks/packages/livecodebench/` (a few seconds), then Inspect builds one image
-per task, one after another, before any sample starts. As shipped, each build takes ~1 minute
-and stores its own ~750 MB of layers, so setup is ~90 minutes and ~75 GB of disk. With the
-Dockerfile patch described under Patches, the apt layer is shared: ~1 minute and ~2 GB total.
-Later runs reuse the images and start within a minute. During image builds `inspect ctl` reports
-no running eval; watch the eval output instead. Once samples start, 100 containers run at once.
-
 ## Results
+
+Not run yet. `run_eval.sh` records the configuration below; fill the tables from the final `.eval` log (AGENTS.md,
+section 5) after the leak audit of section 11, with sample errors counted as failures.
 
 With model generation config:
 
-`temperature=1.0, top_p=0.95, top_k=20, reasoning_effort=xhigh, max_tokens=65536 (per turn), max_connections=100, max_sandboxes=100, time_limit=3600s, client_timeout=7200, epochs=3 (mean)`
+`temperature=1.0, top_p=0.95, top_k=20, reasoning_effort=xhigh, max_tokens=65536 (per turn), max_connections=100, max_sandboxes=100, time_limit=3600s, client_timeout=7200, override_cpus=0, kv_cache_dtype=bfloat16, TP=2 DP=4, epochs=1`
 
 the following scores and token stats are obtained:
 
 | metric | value |
 |---|---|
-| accuracy (avg@3) | 0.927 |
-| stderr | 0.023 |
-| per-epoch pass rate | 0.94 / 0.90 / 0.94 |
-| samples | 300 (100 tasks x 3 epochs) |
-| tasks passing 3/3, 2/3 or 1/3, 0/3 | 89 / 7 / 4 |
-| time-limit hits (3600 s) | 13 |
-| no solution submitted (scored 0) | 13 |
-| sample errors | 0 |
-| turns truncated at max_tokens | 7 |
+| | |
 
 | tokens / sample | input | output | reasoning |
 |---|---|---|---|
-| mean | 359,971 | 21,253 | 16,308 |
-| median | 98,004 | 8,408 | 4,872 |
-| max | 3,883,069 | 132,169 | 131,072 |
-
-Input tokens are cumulative over agent turns (history is resent each turn). Agent turns per
-sample: median 10, mean 12, max 56. Wall time per sample: median 229 s, mean 695 s, max 3614 s.
-Total run time about 3.5 h on 8x H100 (100 concurrent samples).
-
-Always-failing tasks (0/3): abc363_f, arc184_d, arc192_b, arc196_c.
+| | | | |
 
 ## Patches for upstream
 
 Two fixes to the Harbor LiveCodeBench dataset are proposed upstream in
 [harbor-framework/harbor-datasets](https://github.com/harbor-framework/harbor-datasets):
-
-- [#257](https://github.com/harbor-framework/harbor-datasets/pull/257) — `tests/test.sh` writes
-  `/logs/verifier/reward.txt` (reward 0) before its early exit when the agent never created
-  `/app/solution.py`. Without it the sample becomes an *error* (excluded from accuracy) and
-  Inspect's default fail-on-error policy aborts the eval.
-- [#256](https://github.com/harbor-framework/harbor-datasets/pull/256) — `environment/Dockerfile`
-  copies the per-task files *after* `apt-get`, so the 100 images share the apt layer (~1 min and
-  ~2 GB to build) instead of each storing ~750 MB (~90 min and ~75 GB).
-
-**Until they are merged**, `run_eval.sh` does not use the hub package. It loads the dataset through
-`inspect_harbor/harbor` from `assets/harbor_registry.json`: the upstream registry entry for
-`livecodebench@6.0` with every task pinned to commit `f7852012df9d20a0a0fe9af36e1f632a6094975c` of
-[eldarkurtic/harbor-datasets, branch `livecodebench-eldar-fixes`](https://github.com/eldarkurtic/harbor-datasets/tree/livecodebench-eldar-fixes),
-which is upstream `main` plus both PRs. Harbor fetches the task files from GitHub at that commit, so
-nothing has to be patched by hand.
-
-Once both PRs are merged and the hub package is republished, replace the two `-T` lines in
+[#257](https://github.com/harbor-framework/harbor-datasets/pull/257) makes `tests/test.sh` write
+`/logs/verifier/reward.txt` (reward 0) when the agent never created `/app/solution.py` (otherwise the sample becomes
+an error and aborts the eval), and [#256](https://github.com/harbor-framework/harbor-datasets/pull/256) moves the
+per-task `COPY` after `apt-get` in `environment/Dockerfile` so the 100 images share their apt layer. Until they are
+merged, `run_eval.sh` loads the dataset through `inspect_harbor/harbor` from `assets/harbor_registry.json`: the
+upstream `livecodebench@6.0` entry with every task pinned to commit `f7852012df` of
+[eldarkurtic/harbor-datasets, branch `livecodebench-eldar-fixes`](https://github.com/eldarkurtic/harbor-datasets/tree/livecodebench-eldar-fixes)
+(upstream `main` plus both PRs). Once merged and the hub package republished, replace the two `-T` lines in
 `run_eval.sh` with `inspect eval inspect_harbor/livecodebench` and delete `assets/harbor_registry.json`.

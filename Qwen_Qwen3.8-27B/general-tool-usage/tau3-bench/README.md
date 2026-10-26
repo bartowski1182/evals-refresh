@@ -8,58 +8,77 @@
 | vLLM recipe | https://recipes.vllm.ai/Qwen/Qwen3.8-27B |
 | Task source | https://hub.harborframework.com/datasets/sierra-research/tau3-bench |
 
-**Protocol note.** Neither model card reports tau3-bench. The task set is tau2-bench >= 1.0 with the
-banking_knowledge domain (the voice modality of tau3 is not part of the package). Inspect's generic ReAct agent
-(`bash`, `python`, `update_plan`, plus the task's MCP tools: `start_conversation`, `send_message_to_user`,
-`end_conversation` and the domain tools) drives the conversation; the user simulator and the natural-language
-assertion judge (91 tasks) are LLM calls made by the runtime and the verifier through an OpenAI-compatible
-endpoint, both Qwen/Qwen3.8-27B here (a fixed simulator as on the tau-bench leaderboards; the leaderboard uses
-gpt-5.2 at low reasoning effort). The same vLLM server also serves the simulator and the judge (OPENAI_BASE_URL points containers at the host). One epoch (pass^1) instead of the repo's usual avg@3; a uniform
-`--time-limit 3600` (Harbor's agent budget) as a runaway guard. The numbers are not comparable to taubench.com;
-the native Inspect re-implementation of the same task set is in `../tau2-bench`.
+**Protocol note.** No model card reports tau3-bench. The task set is tau2-bench >= 1.0 with the banking_knowledge
+domain (the voice modality of tau3 is not part of the package). Inspect's generic ReAct agent (`bash`, `python`,
+`update_plan`, plus the task's MCP tools: `start_conversation`, `send_message_to_user`, `end_conversation` and the
+domain tools) drives the conversation; the user simulator and the natural-language assertion judge (91 tasks) are
+LLM calls made by the runtime and the verifier through an OpenAI-compatible endpoint, both Qwen/Qwen3.8-27B here (a
+fixed simulator as on the tau-bench leaderboards; the leaderboard uses gpt-5.2 at low reasoning effort). A second
+vLLM server (GPUs 4-7, TP=4) serves Qwen/Qwen3.8-27B as the simulator and judge while the model under test runs on
+GPUs 0-3 (TP=4), in all three dirs (the Gemma pattern), so they are served identically for the three models. One epoch
+(pass^1); a uniform `--time-limit 3600` (Harbor's agent budget) as a runaway guard. This dir is one of the three identical copies of the task that make up the Qwen3.8-27B comparison set (`Qwen_Qwen3.8-27B`, `RedHatAI_Qwen3.8-27B-MXFP4`, `RedHatAI_Qwen3.8-27B-MXFP4xFP8`): same task, agent, prompt, sampling, limits, concurrency, epochs (one, pass@1), vLLM release and serving topology, so the three numbers are like for like; only the checkpoint differs. The numbers are not
+comparable to taubench.com; the native Inspect re-implementation of the same task set is in `../tau2-bench`.
+
+**Checkpoint.** `Qwen/Qwen3.8-27B` is the BF16 base model of the comparison set, the reference the two RedHatAI
+quantized checkpoints are measured against. The KV cache is BF16 (`--kv-cache-dtype bfloat16`, this checkpoint's
+default, spelled out so that the three `serve.sh` are identical), and vLLM 0.32.0 is used for the three dirs (see
+Setup). Record the checkpoint revision here before the run.
 
 ## Files
 
 - `serve.sh` — deploys the model with a vLLM server. vLLM-serve arguments live here
-  (parallelism, context length, reasoning/tool parsers), taken from the official recipe.
+  (parallelism, context length, reasoning/tool parsers), taken from the Qwen/Qwen3.8-27B recipe, plus the BF16 KV cache; identical in the three dirs apart from
+  `MODEL`.
 - `run_eval.sh` — runs the Inspect task against that server. Inspect-side params live here
-  (dataset copy, epochs, sampling params, per-turn max tokens, concurrency, sandbox count, time limit,
-  simulator/judge endpoint variables).
-- `server_requirements.txt` / `client_requirements.txt` — `pip freeze` of the vLLM and Inspect
-  venvs that produced the results below. The client venv is the `inspect-harbor` one.
-- `local_orchestrator.sh` — runs everything in your local dev environment: activates the
-  venvs, sets GPUs and TP/DP, points Docker at the rootless daemon, exports the host address containers can
-  reach, starts the server(s) in the background, runs `run_eval.sh`, tears down. **This is the only file you
-  should modify** to match the environment you run in.
+  (dataset copy, epochs, sampling params, per-turn max tokens, concurrency, sandbox count, time limit, simulator/judge endpoint variables); identical in the three dirs apart from `MODEL`.
+- `assets/serve_user_model.sh` — vLLM server for the Qwen/Qwen3.8-27B user simulator on a second port (recipe flags),
+  started by `local_orchestrator.sh`.
+- `server_requirements.txt` / `client_requirements.txt` — `pip freeze` of the vLLM server environment and of the Inspect venv
+  that produce the results, with the host (GPUs, driver, CUDA, Python) in the header. Written after the final run; not present yet.
+- `local_orchestrator.sh` — runs everything in your local dev environment: starts `serve.sh` (GPUs 0-3) and `assets/serve_user_model.sh` (GPUs 4-7, published on all interfaces for the task containers) from the vLLM podman image (`VLLM_IMAGE`, by default the pinned one) or a venv (`VLLM_VENV`) through `tools/vllm_server.sh`, one TP=4 replica each, with the HF cache and the task dir mounted in podman mode, points Docker at the rootless daemon, exports the host address containers can reach, waits for both, activates the client venv (`INSPECT_VENV`), runs `run_eval.sh`, stops the servers on exit.
+  **This is the only file you should modify** to match the environment you run in.
 
 ## Run
 
 ### Setup (once per host)
 
-Create a server and a client environment as below. The commands use the paths that `local_orchestrator.sh` activates;
-if you keep the environments elsewhere, change the paths there. `server_requirements.txt` and `client_requirements.txt`
-are the exact `pip freeze` of the environments that produced the results below (Python 3.12, host details in their
-headers): installing from them reproduces those environments; the commented alternative gives an equivalent fresh
-install with the same pinned versions.
+Pull the server image and create the client environment as below. The commands use the default server image
+(`DEFAULT_VLLM_IMAGE`) and client venv path (`INSPECT_VENV`); if you keep them elsewhere, set those variables in the
+environment or change them in `local_orchestrator.sh`. Once the results are in, `server_requirements.txt`
+(`tools/vllm_server.sh` provides `vllm_freeze`, which prints `pip freeze` of the selected environment) and
+`client_requirements.txt` hold the exact packages that produced them (host details in their headers); create the
+client environment from its file instead. Use the same server and client environments for the three dirs of the
+comparison set.
 
 ```bash
-# server: vLLM 0.29.0 (CUDA 13 wheels; add the matching https://download.pytorch.org/whl/<cuXXX> index if pip cannot resolve torch)
-python3.12 -m venv ~/.venvs/vllm && source ~/.venvs/vllm/bin/activate
-pip install -r server_requirements.txt          # or: pip install vllm==0.29.0
-# client: Inspect
+# server: the vLLM 0.32.0 podman image, docker.io/vllm/vllm-openai:v0.32.0 pinned by digest (the
+# DEFAULT_VLLM_IMAGE), the same image for the three dirs. 0.32.0 is the first release with the dense MXFP4-weight /
+# FP8-activation scheme the MXFP4xFP8 checkpoint needs; the humming-kernels dependency of its CUDA wheels provides the
+# only MXFP4 GEMM of that release that takes FP8 activations (CUDA, SM75+), so the comparison set needs an NVIDIA host.
+# GPU access from the container goes through the NVIDIA Container Toolkit's CDI spec (generated once per host, as root).
+podman pull docker.io/vllm/vllm-openai:v0.32.0@sha256:befccf0e7e4089aa23926bb6f887a85c0d46c2a99e6de5c5ffdf5cb7957c5b34
+sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+# To serve from a venv instead, create one with the vLLM version server_requirements.txt records (0.32.0, whose CUDA
+# wheels pull in humming-kernels) and pass it as VLLM_VENV; the image is the reference environment.
+# client: Inspect + inspect_harbor with MCP-server support from the fork branch of PR #186 (see Patches)
 python3.12 -m venv ~/.venvs/inspect-harbor && source ~/.venvs/inspect-harbor/bin/activate
-pip install -r client_requirements.txt          # what produced the results (a local 0.7.6-based checkout); or the current setup,
-# inspect_harbor with MCP-server support straight from the fork branch of PR #186 (see Patches):
-# pip install "inspect-harbor @ git+https://github.com/eldarkurtic/inspect_harbor@feat/mcp-servers-and-compose-sidecars" mcp httpx2 "openai==3.14.0"
+pip install "inspect-harbor @ git+https://github.com/eldarkurtic/inspect_harbor@feat/mcp-servers-and-compose-sidecars" mcp httpx2
+pip install "openai==3.14.0"   # last: overrides litellm's openai<3 pin (harmless, Inspect's agent path never imports litellm)
 ```
 
-`inspect-harbor` pulls in `litellm`, which pins `openai<3`, while Inspect's OpenAI-compatible providers need
-`openai>=3`; installing `openai==3.14.0` last overrides the pin (pip prints a conflict warning that is harmless
-here because Inspect's agent path never imports `litellm`). `httpx2` is imported by `inspect-ai` but not declared.
+Check `logs/serve.log` at start-up: `max_model_len` 262144, KV cache dtype `bfloat16`, and the default sampling
+params vLLM takes from the checkpoint's `generation_config.json` (temperature 1.0, top_p 0.95, top_k 20).
 
-Model weights and datasets are fetched from the Hugging Face Hub on first use into the usual cache (`HF_HOME`
-if set). Export `HF_TOKEN` in your shell before running (never in the repo); nothing here is gated, but anonymous Hub
-downloads are rate-limited.
+Docker with the compose plugin (v2.x or later) is required for the sandboxes (podman serves the model only).
+`local_orchestrator.sh` exports `DOCKER_HOST` for a rootless daemon (`unix:///run/user/<uid>/docker.sock`); with a
+rootful daemon drop that export. Rootless Docker needs
+a runc runtime with `NoNewKeyring` in `daemon.json` (one kernel key per container otherwise exhausts a user's quota of
+200) and cannot apply CPU limits, hence `-T override_cpus=0` in `run_eval.sh`. Check the image-store disk space before
+the first run (see `local_env_notes.md`).
+Every sample is a two-service compose project with its own network, so the daemon's `default-address-pools` must hold
+at least `--max-sandboxes` networks (Docker's default runs out near 40). Each task builds two images (about 1.9 GB
+each, layers shared across tasks). The user-simulator server needs the Qwen/Qwen3.8-27B weights (BF16) in the same
+cache.
 
 The task set is generated from the adapter fork that carries the image fix of harbor#3401 (see Patches), with
 tau2-bench checked out at the commit the images pin; `run_eval.sh` reads it from `DATASET_PATH`:
@@ -70,12 +89,9 @@ git clone https://github.com/sierra-research/tau2-bench.git ~/github/eldarkurtic
 git -C ~/github/eldarkurtic/tau2-bench checkout b7ea9074c1cba482b30687fecdb5c8425fd6f619
 cd ~/github/eldarkurtic/harbor/adapters/tau3-bench && uv run tau3-bench --output-dir ~/.cache/harbor/local/tau3-bench-cc9e4b7c --overwrite
 ```
-
-Docker (with the compose plugin) must be reachable by your user. `local_orchestrator.sh` exports `DOCKER_HOST` for
-a rootless daemon (`unix:///run/user/<uid>/docker.sock`, image store under `~/.local/share/docker`); with a
-rootful daemon drop that export. Check the image-store disk space quoted below before the first run. Rootless
-Docker needs a runc runtime with `NoNewKeyring` in `daemon.json` (one kernel key per container otherwise
-exhausts a user's quota of 200) and cannot apply CPU limits, hence `-T override_cpus=0` in `run_eval.sh`.
+`local_orchestrator.sh` serves the checkpoint from the Hugging Face Hub (`MODEL`) through the host's HF cache (`HF_HOME`,
+mounted into the container): download it there once with `hf download` and export `HF_HUB_OFFLINE=1`, or set
+`MODEL_PATH` there to serve a local copy instead. Export `HF_TOKEN` in your shell before running (never in the repo); nothing here is gated, but anonymous Hub downloads are rate-limited.
 
 ### Run the eval
 
@@ -86,40 +102,24 @@ inspect view --log-dir ./logs
 
 Always smoke-test first: `EPOCHS=1 ./local_orchestrator.sh --limit 2`
 
-Requires Docker and the inspect_harbor branch described under Patches. Each task builds two images (about
-1.9 GB each, layers shared across tasks).
-
 ## Results
+
+Not run yet. `run_eval.sh` records the configuration below; fill the tables from the final `.eval` log (AGENTS.md,
+section 5), with sample errors counted as failures.
 
 With model generation config:
 
-`temperature=1.0, top_p=0.95, top_k=20, reasoning_effort=xhigh, max_tokens=65536 (per turn), time_limit=3600s, client_timeout=7200, tool_timeout=300s, TP=8 DP=1, epochs=1; user simulator and assertion judge openai/Qwen/Qwen3.8-27B on the same server (simulator at reasoning effort low, as the package defaults); 375 tasks in one run at 56 samples in flight`
+`temperature=1.0, top_p=0.95, top_k=20, reasoning_effort=xhigh, max_tokens=65536 (per turn), time_limit=3600s, client_timeout=7200, tool_timeout=300s, override_cpus=0, kv_cache_dtype=bfloat16, TP=4 DP=1 on GPUs 0-3, epochs=1; user simulator and assertion judge openai/Qwen/Qwen3.8-27B on a second server (GPUs 4-7, TP=4; simulator at reasoning effort low, as the package defaults); 56 samples in flight`
 
 the following scores and token stats are obtained:
 
 | metric | value |
 |---|---|
-| pass^1 over all domains (task-weighted mean, 375 tasks) | 0.651 (244 of 375) |
-| stderr (binomial) | 0.0246 |
-| pass^1 airline | 0.780 (39 of 50) |
-| pass^1 retail | 0.711 (81 of 114) |
-| pass^1 telecom | 0.886 (101 of 114) |
-| pass^1 banking_knowledge | 0.237 (23 of 97) |
-| samples | 375 of 375 tasks, 1 epoch |
-| time-limit hits (3600 s) | 0 |
-| turns truncated at max_tokens | 0 |
-| sample errors (excluded from the score) | 0 |
+| | |
 
-| agent tokens / sample | input | output | reasoning |
+| tokens / sample | input | output | reasoning |
 |---|---|---|---|
-| mean | 513,473 | 11,509 | 6,412 |
-| median | 261,906 | 7,639 | 4,627 |
-| max | 6,386,156 | 93,027 | 63,574 |
-
-Agent tokens cover the model under test only; the user simulator and the assertion judge are called by the task
-containers and are not in the Inspect log. Input tokens are cumulative over agent turns (history is resent each
-turn). Agent turns per sample: median 17, mean 19, max 73. Wall time per sample: median 249 s,
-mean 402 s, max 2,606 s. Total run time 0 h 52 min on 8x H100.
+| | | | |
 
 ## Patches for upstream
 
@@ -141,6 +141,4 @@ Two upstream defects had to be fixed to run this package faithfully:
   adapter (see Setup); once merged and the hub package republished, switch back to
   `inspect_harbor/sierra_research_tau3_bench -T ref=<digest>`.
 
-The results below were produced with a local checkout of inspect_harbor 0.7.6 carrying the same MCP change and a
-patched local copy of the hub package with the same image changes; the setup above was verified afterwards with
-`--solver inspect_harbor/oracle` on retail tasks. Task content, tools and verifiers are unchanged by either fix.
+Task content, tools and verifiers are unchanged by either fix.

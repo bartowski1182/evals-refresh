@@ -46,6 +46,12 @@ Keep them in `local_env_notes.local.md` next to this file, which git ignores, an
   MXFP4-weight / FP8-activation MoE path (vllm-project/vllm#59815, merged 2026-10-14, included in the PR branch); the
   start-up log must show `CompressedTensorsW4A8Mxfp4MoEMethod`, otherwise the experts run with BF16 activations. The
   checkpoint is 453 GB: one TP=8 replica with expert parallelism on an 8-GPU H200/B200/B300 node, nothing smaller.
+- Dense MXFP4-weight / FP8-activation checkpoints (compressed-tensors, e.g. `RedHatAI/Qwen3.8-27B-MXFP4xFP8`) need vLLM
+  0.32.0 or later (the `CompressedTensorsW4A8Mxfp4` scheme) and the `humming-kernels` package that the CUDA wheels
+  depend on: in 0.32.0 Humming is the only MXFP4 linear kernel that takes FP8 activations, on CUDA SM75+. On ROCm
+  (AITER) or without Humming the scheme falls back to MXFP4 activations with a one-line warning and the run is a W4A4
+  run (AGENTS.md, section 9). The serve log line `Using HummingMxFp4LinearKernel for MXFP4 GEMM` confirms the path.
+
 - Serving from a podman image on NVIDIA (when the vLLM you need is a branch build): give the container the GPUs
   through the NVIDIA Container Toolkit's CDI spec (`nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml` once per
   host, then `--device nvidia.com/gpu=all`; `CUDA_VISIBLE_DEVICES` selects GPUs inside), `--ipc host` for NCCL and the
@@ -196,7 +202,7 @@ Setup gives the commands), name and place them as you like, and point `local_orc
   `uv pip install --no-deps "inspect_harbor @ git+https://github.com/eldarkurtic/inspect_harbor@<commit>"`: its
   pyproject's uv `exclude-newer = "7 days"` breaks a resolving install, and a local-directory install records no
   commit in `pip freeze`.
-- The MXFP4 Qwen3.8-27B DeepSWE dirs ran stock inspect-harbor 1.0.0, for its verifier fixes, without the network fix.
-  Don't reuse that setup for new DeepSWE runs.
+- The superseded earlier DeepSWE runs of the Qwen3.8-27B dirs (before the comparison set of 2026-10-21) used stock
+  inspect-harbor 1.0.0, for its verifier fixes, without the network fix. Don't reuse that setup for new DeepSWE runs.
 - A `client_requirements.txt` that contains litellm next to `openai==3.14.0` installs only with
   `pip install --no-deps -r client_requirements.txt`; a resolving install fails on litellm's `openai<3` pin.

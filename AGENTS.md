@@ -60,7 +60,7 @@ which git ignores; read it too if it exists.
   and stops vLLM servers from a venv (`VLLM_VENV`) or a podman image (`VLLM_IMAGE`; setting both is an error) and stops them
   on any exit. It holds only environment glue; what is measured stays in the dir's `serve.sh` and `run_eval.sh`. The
   orchestrator sets `DEFAULT_VLLM_IMAGE`, used when neither is set, to the image that produced the dir's results, and `logs/serve.log` records the one a run
-  used. The Muse-Spark-Open dirs use it; other dirs still inline their venv or podman commands. Move a dir
+  used. The Qwen3.8-27B comparison-set and Muse-Spark-Open dirs use it; other dirs still inline their venv or podman commands. Move a dir
   over when you touch its orchestrator, not as a sweep.
 - `serve.sh` and `run_eval.sh` are plain, readable bash with env-var overrides
   (`MODEL`, `PORT`, `TP`, `DP`, `EPOCHS`, `LOG_DIR`, `MAX_TOKENS`, `MAX_CONNECTIONS`, ...). No
@@ -295,6 +295,12 @@ Python.
   with the wrong activation precision (an MXFP4-weight / FP8-activation MoE loaded as W4A16 before
   vllm-project/vllm#59815). Check the quantization method vLLM logs at start-up against the checkpoint's
   `quantization_config` before the smoke test.
+- **A dense MXFP4-weight / FP8-activation checkpoint can silently run as W4A4.** vLLM 0.32.0 (the first release with
+  the dense `CompressedTensorsW4A8Mxfp4` scheme) has one MXFP4 linear kernel that takes FP8 activations, Humming
+  (`humming-kernels`, a dependency of the CUDA wheels, SM75+); FlashInfer, B12X, Marlin, the emulation path and ROCm's
+  AITER are MXFP4-activation only. If no kernel can implement the FP8 key, the scheme logs a `warning_once` ("No MXFP4
+  linear kernel supports ... falling back to MXFP4 activations") and runs the checkpoint as its W4A4 sibling. Check the
+  start-up line `Using <Kernel> for MXFP4 GEMM` (it must name the Humming kernel) and the absence of that warning.
 
 ## 10. Conventions established in the task directories
 
@@ -311,7 +317,7 @@ revert these departures:
   - 8: aime-2026 (only 30 problems).
   - 1: mmlu-pro (12k samples), swe-bench-verified, swe-bench-pro, deepswe-1.1, gdpval-aa, tau2-bench, tau3-bench.
   - 1 for every task of the four Qwen3.8-Flash-Next dirs (RedHatAI, Inferact and nvidia NVFP4, Qwen BF16), at the
-    user's request.
+    user's request, and for every task of the three Qwen3.8-27B comparison-set dirs (below).
 - **Two-phase generous-time rerun (Terminal-Bench 2.1, GLM-5.3-MXFP4xFP8 dirs).** At the user's request, the samples
   that hit the first pass's time limit (all failed) plus one leaked sample were rerun once at a higher
   `--time-limit` via `inspect eval --sample-id <comma list>`; each task counts once, the rerun result replacing the
@@ -342,14 +348,38 @@ revert these departures:
   Muse Spark support is not in a vLLM release, so `local_orchestrator.sh` runs `serve.sh` inside a podman image built
   from the vLLM branch (see `local_env_notes.md`) through `tools/vllm_server.sh`; the dirs were created on a host without the GPUs to run them and
   have no results or requirements files yet.
+- **Qwen3.8-27B comparison set** (`Qwen_Qwen3.8-27B`, `RedHatAI_Qwen3.8-27B-MXFP4`, `RedHatAI_Qwen3.8-27B-MXFP4xFP8`:
+  the BF16 base model and its W4A4 and W4A8 quantizations): three copies of the same 12 tasks, written on 2026-10-21 for
+  a like-for-like comparison on one NVIDIA host. Per task, `serve.sh`, `run_eval.sh`, `local_orchestrator.sh` and
+  `assets/` are identical in the three dirs apart from the `MODEL` default and the checkpoint notes in the comments;
+  keep them that way (an edit to one copy goes into the other two, the exception to the rule below). `serve.sh` takes
+  the base recipe's flags plus `--kv-cache-dtype bfloat16` (the BF16 model's default; the MXFP4 checkpoint declares an
+  FP8 KV scheme that vLLM would apply under `auto`), TP=2 × DP=4 for the three models (the smallest topology that holds
+  the BF16 model with its 262k context on 80 GB GPUs); the multi-turn tasks export TP=8 × DP=1 in the orchestrator as
+  usual. vLLM 0.32.0 with the Humming kernel for the three (section 9: the W4A8 checkpoint runs as W4A4 on ROCm or
+  without Humming), served the Muse-Spark-Open way: every `local_orchestrator.sh` runs `serve.sh` inside the
+  `docker.io/vllm/vllm-openai:v0.32.0` podman image (pinned by digest, `DEFAULT_VLLM_IMAGE`; started through `tools/vllm_server.sh`, so
+  `VLLM_VENV=<venv dir>` serves from a venv instead) with the host's HF cache mounted
+  (`local_env_notes.md`, "Serving from a podman image on NVIDIA"); the Inspect client runs from a host venv and the
+  sandboxed tasks keep using Docker. deepswe-1.1, swe-bench-pro and swe-bench-verified carry the section 11 fixes. tau2/tau3-bench run
+  the Qwen/Qwen3.8-27B user simulator on a second server (`assets/serve_user_model.sh`, the Gemma pattern) on GPUs 4-7
+  and the model under test at TP=4 on GPUs 0-3, in all three dirs (the BF16 dir serves its model twice), one podman
+  container per server; in tau3-bench the simulator's port is published on all interfaces, because the task containers
+  call it at the host's IP, and tau2-bench's `run_eval.sh` takes the simulator's URL from `USER_BASE_URL`. All epochs
+  default to 1. The MXFP4xFP8 checkpoint was not public on the HF Hub on 2026-10-21, so the READMEs ask to verify its
+  `quantization_config` and `generation_config.json` and to record the revision before the run. No results or
+  requirements files yet: the earlier runs of the `Qwen_Qwen3.8-27B` (H100, vLLM 0.29.0, avg@3 and avg@8 on some tasks,
+  SWE tasks without the leak fixes, the eval server as tau user simulator) and `RedHatAI_Qwen3.8-27B-MXFP4` (MI355X,
+  vLLM 0.31.0 ROCm, 8 tasks) dirs were superseded by this set; their READMEs and requirements files are in git history
+  before the commit that introduced the set.
 - **Serving topology for multi-turn tasks.** swe-bench-*, deepswe-1.1, bfcl, gdpval-aa, tau2-bench and tau3-bench
   export `TP=8 DP=1` in `local_orchestrator.sh` instead of TP=2 × DP=4. vLLM's prefix cache is per replica, and
   DP routes each turn to a random replica, so agent histories would be prefilled again on every turn. `serve.sh`
   keeps the recipe defaults; the override lives only in the orchestrator.
-- **User simulator (tau2/tau3-bench).** Qwen/Qwen3.8-27B plays the customer for every model. The Qwen dirs reuse
-  the eval server. The Gemma dirs start a second server from `assets/serve_user_model.sh` on GPUs 4-7 and run
-  the model under test at TP=4 on GPUs 0-3. This is the one accepted exception to "one task directory, one
-  server".
+- **User simulator (tau2/tau3-bench).** Qwen/Qwen3.8-27B plays the customer for every model. The Gemma dirs and the
+  Qwen3.8-27B comparison-set dirs start a second server from `assets/serve_user_model.sh` on GPUs 4-7 and run the
+  model under test at TP=4 on GPUs 0-3 (the superseded `Qwen_Qwen3.8-27B` runs reused the eval server). This is the one
+  accepted exception to "one task directory, one server".
 - **Docker for agent tasks.** `local_orchestrator.sh` exports `DOCKER_HOST` pointing at the rootless socket
   (`/run/user/$UID/docker.sock`); the image store location is host-specific (see `local_env_notes.md`). Harbor tasks pass
   `-T override_cpus=0`, because rootless Docker rejects CPU caps. In tau3-bench, containers reach the host's
@@ -371,9 +401,11 @@ revert these departures:
   `assets/harbor_registry.json`, which has one entry per task, each pinned to a commit of
   `github.com/eldarkurtic/harbor-datasets`. `run_eval.sh` points `inspect_harbor/harbor -T registry_path=...` at
   that file.
-- **SWE-style tasks can leak the solution to the agent.** Only the Qwen3.8-Flash-Next dirs carry the fixes;
-  the other dirs of deepswe-1.1, swe-bench-pro and swe-bench-verified ran without them. See section 11.
-- **Every task exists once per model.** Do not mirror an edit into the other model's copy unless asked.
+- **SWE-style tasks can leak the solution to the agent.** Only the Qwen3.8-Flash-Next dirs and the Qwen3.8-27B
+  comparison-set dirs carry the fixes; the Gemma and amd dirs of deepswe-1.1, swe-bench-pro and swe-bench-verified ran
+  without them. See section 11.
+- **Every task exists once per model.** Do not mirror an edit into the other model's copy unless asked (the
+  Qwen3.8-27B comparison set above is the exception: its three copies must stay identical).
 - **Coverage matrix.** When you add a task, set ✅ in the `Repo` column of `eval_coverage_matrix.md` in both
   places: the Benchmarks table and the per-subclass detail table.
 
@@ -385,8 +417,10 @@ allows before the run, and audit the trajectories after it.
 
 **Fixes.** Copy deepswe-1.1, swe-bench-pro and swe-bench-verified from the Qwen3.8-Flash-Next dirs
 (`Qwen_Qwen3.8-Flash-Next`, `RedHatAI_Qwen3.8-Flash-Next-NVFP4`, `Inferact_Qwen3.8-Flash-Next-NVFP4`,
-`nvidia_Qwen3.8-Flash-Next-NVFP4`). The `Qwen_Qwen3.8-27B`, `google_gemma-4-31B-it`, `RedHatAI_Qwen3.8-27B-MXFP4`
-and `amd_Qwen3.8-27B-Quark-AWQ-MXFP4` copies of these tasks ran before the fixes; don't reuse their client setup.
+`nvidia_Qwen3.8-Flash-Next-NVFP4`) or from the Qwen3.8-27B comparison-set dirs (section 10), which carry the same
+fixes. The `google_gemma-4-31B-it` and `amd_Qwen3.8-27B-Quark-AWQ-MXFP4` copies of these tasks, and the superseded
+earlier runs of `Qwen_Qwen3.8-27B` and `RedHatAI_Qwen3.8-27B-MXFP4` (in git history), ran before the fixes; don't
+reuse their client setup.
 
 - **deepswe-1.1.** Every `task.toml` sets `network_mode = "no-network"` for `[agent]` and `[verifier]`, but stock
   inspect_harbor (1.0.0 and earlier) applies only `[environment].network_mode`, so agents silently get internet.

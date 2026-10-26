@@ -4,62 +4,82 @@
 |---|---|
 | Task | `inspect_evals/swe_bench` (500 instances, `princeton-nlp/SWE-bench_Verified` test split, revision `c104f840cc`) |
 | Category | agentic-and-coding (subclass: swe-agent) |
-| Exec tier | `agent` — one prebuilt Docker image per instance (Epoch AI, ghcr.io), no internet, test-based grading |
+| Exec tier | `agent` — one prebuilt Docker image per instance (official SWE-bench images, Docker Hub), no internet, test-based grading |
 | vLLM recipe | https://recipes.vllm.ai/Qwen/Qwen3.8-27B |
 | Task source | https://github.com/UKGovernmentBEIS/inspect_evals/tree/main/src/inspect_evals/swe_bench (eval version 5-C) |
 
-**Protocol note.** The model card does not report SWE-bench Verified (it reports SWE-bench Pro with the Claude Code harness). `inspect_evals` solves each instance with its default ReAct agent
-(`python`, `bash_session`, `text_editor`, `submit`; 210 s tool timeout) with `--message-limit 200` (about 100 agent
-turns; the package default of 30 stops most samples after 13 turns) and a `--time-limit 14400` wall-clock guard (56 samples in flight, what the server's 4M-token KV cache holds with a warm prefix cache once histories average 45k tokens).
-One epoch (pass@1 over 500 instances) instead of the repo's usual avg@3. Grading delegates to the official
-`swebench` harness (FAIL_TO_PASS and PASS_TO_PASS must all pass). The official leaderboard numbers come
-from other scaffolds (SWE-agent, OpenHands, Claude Code, ...) and are not directly comparable. All
-in-flight samples share one vLLM server, so wall-clock limits bind harder than against an API endpoint.
+**Protocol note.** The base model card does not report SWE-bench Verified. `inspect_evals` solves each instance with
+its default ReAct agent (`python`, `bash_session`, `text_editor`, `submit`; 210 s tool timeout) with
+`--message-limit 200` and a `--time-limit 14400` guard, no internet (the task's default), graded by the official
+`swebench` harness (FAIL_TO_PASS and PASS_TO_PASS must all pass). One epoch (pass@1); one TP=8 replica so every turn
+of a sample hits one prefix cache. This dir is copied from the Qwen3.8-Flash-Next SWE-bench Verified dir (AGENTS.md,
+section 11): the sandbox images are the official SWE-bench images
+(`-T image_name_template=swebench/sweb.eval.{arch}.{org}_1776_{repo}-{issue}:latest`) instead of `inspect_evals`'
+default Epoch AI images, which keep every release tag of the project and so expose the reference fix offline (see
+Patches). This dir is one of the three identical copies of the task that make up the Qwen3.8-27B comparison set (`Qwen_Qwen3.8-27B`, `RedHatAI_Qwen3.8-27B-MXFP4`, `RedHatAI_Qwen3.8-27B-MXFP4xFP8`): same task, agent, prompt, sampling, limits, concurrency, epochs (one, pass@1), vLLM release and serving topology, so the three numbers are like for like; only the checkpoint differs.
+
+**Checkpoint.** `Qwen/Qwen3.8-27B` is the BF16 base model of the comparison set, the reference the two RedHatAI
+quantized checkpoints are measured against. The KV cache is BF16 (`--kv-cache-dtype bfloat16`, this checkpoint's
+default, spelled out so that the three `serve.sh` are identical), and vLLM 0.32.0 is used for the three dirs (see
+Setup). Record the checkpoint revision here before the run.
 
 ## Files
 
 - `serve.sh` — deploys the model with a vLLM server. vLLM-serve arguments live here
-  (parallelism, context length, reasoning/tool parsers), taken from the official recipe.
+  (parallelism, context length, reasoning/tool parsers), taken from the Qwen/Qwen3.8-27B recipe, plus the BF16 KV cache; identical in the three dirs apart from
+  `MODEL`.
 - `run_eval.sh` — runs the Inspect task against that server. Inspect-side params live here
-  (task, epochs, sampling params, per-turn max tokens, message limit, concurrency, sandbox count, time limit).
-- `server_requirements.txt` / `client_requirements.txt` — `pip freeze` of the vLLM and Inspect
-  venvs that produced the results below. The client venv is the `inspect_evals` one with the
-  `swe_bench` extra (see Run).
-- `local_orchestrator.sh` — runs everything in your local dev environment: activates the
-  venvs, sets GPUs, points Docker at the rootless daemon, starts `serve.sh` in the background,
-  runs `run_eval.sh`, tears down. **This is the only file you should modify** to match the
-  environment you run in.
+  (task and image template, epochs, sampling params, reasoning effort, per-turn max tokens, message and time limits, concurrency, sandbox count); identical in the three dirs apart from `MODEL`.
+- `server_requirements.txt` / `client_requirements.txt` — `pip freeze` of the vLLM server environment and of the Inspect venv
+  that produce the results, with the host (GPUs, driver, CUDA, Python) in the header. Written after the final run; not present yet.
+- `local_orchestrator.sh` — runs everything in your local dev environment: starts `serve.sh` from the vLLM podman image (`VLLM_IMAGE`, by default the pinned one) or a venv (`VLLM_VENV`) through `tools/vllm_server.sh` (GPUs 0-7, port 8000, one TP=8 replica, the HF cache and the task dir mounted in podman mode), points Docker at the rootless daemon, waits for the server, activates the client venv (`INSPECT_VENV`), runs `run_eval.sh`, stops the server on exit.
+  **This is the only file you should modify** to match the environment you run in.
 
 ## Run
 
 ### Setup (once per host)
 
-Create a server and a client environment as below. The commands use the paths that `local_orchestrator.sh` activates;
-if you keep the environments elsewhere, change the paths there. `server_requirements.txt` and
-`client_requirements.txt` are the exact `pip freeze` of the environments that produced the results below (Python 3.12,
-host details in their headers): installing from them reproduces those environments; the commented alternative gives an
-equivalent fresh install with the same pinned versions.
+Pull the server image and create the client environment as below. The commands use the default server image
+(`DEFAULT_VLLM_IMAGE`) and client venv path (`INSPECT_VENV`); if you keep them elsewhere, set those variables in the
+environment or change them in `local_orchestrator.sh`. Once the results are in, `server_requirements.txt`
+(`tools/vllm_server.sh` provides `vllm_freeze`, which prints `pip freeze` of the selected environment) and
+`client_requirements.txt` hold the exact packages that produced them (host details in their headers); create the
+client environment from its file instead. Use the same server and client environments for the three dirs of the
+comparison set.
 
 ```bash
-# server: vLLM 0.29.0 (CUDA 13 wheels; add the matching https://download.pytorch.org/whl/<cuXXX> index if pip cannot resolve torch)
-python3.12 -m venv ~/.venvs/vllm && source ~/.venvs/vllm/bin/activate
-pip install -r server_requirements.txt          # or: pip install vllm==0.29.0
-# client: Inspect
-python3.12 -m venv ~/.venvs/inspect && source ~/.venvs/inspect/bin/activate
-pip install -r client_requirements.txt          # what produced the results; or the current setup, inspect_evals with the
-# swebench cap straight from the fork branch (see Patches):
-# pip install "inspect-evals[swe_bench] @ git+https://github.com/eldarkurtic/inspect_evals@fix/swe-bench-cap-swebench-below-5" openai
+# server: the vLLM 0.32.0 podman image, docker.io/vllm/vllm-openai:v0.32.0 pinned by digest (the
+# DEFAULT_VLLM_IMAGE), the same image for the three dirs. 0.32.0 is the first release with the dense MXFP4-weight /
+# FP8-activation scheme the MXFP4xFP8 checkpoint needs; the humming-kernels dependency of its CUDA wheels provides the
+# only MXFP4 GEMM of that release that takes FP8 activations (CUDA, SM75+), so the comparison set needs an NVIDIA host.
+# GPU access from the container goes through the NVIDIA Container Toolkit's CDI spec (generated once per host, as root).
+podman pull docker.io/vllm/vllm-openai:v0.32.0@sha256:befccf0e7e4089aa23926bb6f887a85c0d46c2a99e6de5c5ffdf5cb7957c5b34
+sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+# To serve from a venv instead, create one with the vLLM version server_requirements.txt records (0.32.0, whose CUDA
+# wheels pull in humming-kernels) and pass it as VLLM_VENV; the image is the reference environment.
+# client: Inspect + inspect_evals with the swe_bench extra (swebench pinned < 5, see Patches)
+python3.12 -m venv ~/.venvs/inspect-swebench && source ~/.venvs/inspect-swebench/bin/activate
+pip install "inspect-ai==0.3.263" "inspect-evals[swe_bench]==0.20.0" "swebench==4.1.0" "openai==3.14.0"
 ```
 
-Model weights and datasets are fetched from the Hugging Face Hub on first use into the usual cache (`HF_HOME`
-if set). Export `HF_TOKEN` in your shell before running (never in the repo); nothing here is gated, but anonymous Hub
-downloads are rate-limited.
+Check `logs/serve.log` at start-up: `max_model_len` 262144, KV cache dtype `bfloat16`, and the default sampling
+params vLLM takes from the checkpoint's `generation_config.json` (temperature 1.0, top_p 0.95, top_k 20).
 
-Docker (with the compose plugin) must be reachable by your user. `local_orchestrator.sh` exports `DOCKER_HOST` for
-a rootless daemon (`unix:///run/user/<uid>/docker.sock`, image store under `~/.local/share/docker`); with a
-rootful daemon drop that export. Check the image-store disk space quoted below before the first run. Rootless
-Docker needs a runc runtime with `NoNewKeyring` in `daemon.json` (one kernel key per container otherwise
-exhausts a user's quota of 200) and cannot apply CPU limits, hence `-T override_cpus=0` in `run_eval.sh`.
+Docker with the compose plugin (v2.x or later) is required for the sandboxes (podman serves the model only).
+`local_orchestrator.sh` exports `DOCKER_HOST` for a rootless daemon (`unix:///run/user/<uid>/docker.sock`); with a
+rootful daemon drop that export. Rootless Docker needs
+a runc runtime with `NoNewKeyring` in `daemon.json` (one kernel key per container otherwise exhausts a user's quota of
+200) and cannot apply CPU limits, hence `-T override_cpus=0` in `run_eval.sh`. Check the image-store disk space before
+the first run (see `local_env_notes.md`).
+
+The 500 instance images (official SWE-bench images `swebench/sweb.eval.x86_64.*`, about 5 GB each before layer
+sharing) are pulled, not built, from Docker Hub (100 anonymous pulls per hour per IP); pull them ahead of time at
+that rate, or through `mirror.gcr.io` (see `local_env_notes.md`, which also covers the 34 matplotlib images whose
+file owners exceed rootless Docker's subordinate UID range). Before an instance runs, check its image for commits
+newer than the base commit (AGENTS.md, section 11).
+`local_orchestrator.sh` serves the checkpoint from the Hugging Face Hub (`MODEL`) through the host's HF cache (`HF_HOME`,
+mounted into the container): download it there once with `hf download` and export `HF_HUB_OFFLINE=1`, or set
+`MODEL_PATH` there to serve a local copy instead. Export `HF_TOKEN` in your shell before running (never in the repo); the dataset is downloaded from the Hugging Face Hub at the pinned revision.
 
 ### Run the eval
 
@@ -68,65 +88,38 @@ exhausts a user's quota of 200) and cannot apply CPU limits, hence `-T override_
 inspect view --log-dir ./logs
 ```
 
-Always smoke-test first: `EPOCHS=1 ./local_orchestrator.sh --limit 2`
-
-Requires Docker with roughly 150 GB free in its image store. **What to expect on the first run:**
-Inspect pulls one prebuilt image per instance from `ghcr.io/epoch-research` as containers start
-(500 images, 1.2 GB compressed each on average but sharing 33 GB of unique layers; anonymous pulls
-work). Pre-pull with `docker pull` to avoid stalling the first samples. Later runs reuse the images.
-Containers run with `network_mode: none`.
+Always smoke-test first: `./local_orchestrator.sh --limit 2`
 
 ## Results
 
+Not run yet. `run_eval.sh` records the configuration below; fill the tables from the final `.eval` log (AGENTS.md,
+section 5) after the leak audit of section 11, with sample errors counted as failures.
+
 With model generation config:
 
-`temperature=1.0, top_p=0.95, top_k=20, reasoning_effort=xhigh, max_tokens=65536 (per turn), message_limit=200, time_limit=14400s, client_timeout=7200, tool_timeout=210s, TP=8 DP=1, epochs=1; 468 instances in one run (concurrency launched at 96 and retuned live to 64 / 40 / 48 / 56 samples) plus the 32 matplotlib instances in a second run at 56`
+`temperature=1.0, top_p=0.95, top_k=20, reasoning_effort=xhigh, max_tokens=65536 (per turn), max_connections=56, max_sandboxes=56, time_limit=14400s, message_limit=200, client_timeout=7200, kv_cache_dtype=bfloat16, TP=8 DP=1, epochs=1`
 
 the following scores and token stats are obtained:
 
 | metric | value |
 |---|---|
-| resolved rate (pass@1, 1 epoch) | 0.772 (386 of 500 scored instances) |
-| stderr (binomial) | 0.0188 |
-| samples | 500 (500 instances x 1 epoch, in 2 runs: 468 + 32 instances) |
-| message-limit hits (200) | 96 |
-| time-limit hits (14400 s) | 0 |
-| samples that called `submit()` | 1 |
-| turns truncated at max_tokens | 7 |
-| sample errors (excluded from the score) | 0 |
+| | |
 
 | tokens / sample | input | output | reasoning |
 |---|---|---|---|
-| mean | 3,211,160 | 44,193 | 34,101 |
-| median | 2,653,292 | 39,338 | 28,390 |
-| max | 11,816,143 | 164,788 | 158,276 |
-
-Input tokens are cumulative over agent turns (history is resent each turn). Agent turns per
-sample: median 63, mean 66, max 99. Wall time per sample: median 2,314 s,
-mean 3,167 s, max 13,035 s. Total run time about 7 h 55 min on 8x H100 across the runs.
-
-Per repository (resolved / instances): django 183/231, sympy 57/75, sphinx 31/44, matplotlib 26/34, scikit-learn 28/32, astropy 16/22, xarray 19/22, pytest 17/19, pylint 5/10, requests 1/8, seaborn 2/2, flask 1/1.
-
-The 32 matplotlib instances ran separately: their Epoch images contain files owned by UIDs beyond this user's
-subuid range, which rootless Docker cannot extract (Docker 29 no longer has the overlay2 `ignore_chown_errors`
-option), so copies with those UIDs mapped to root in the one offending layer were loaded instead. `logs/` holds
-both `.eval` files.
-
+| | | | |
 
 ## Patches for upstream
 
-**Known issue (results affected).** These runs used `inspect_evals`' default Epoch AI images, which keep every
-release tag of the project, so the reference fix is readable offline (for example `git show
-3.0:django/contrib/auth/validators.py` in django__django-11099). The `*_Qwen3.8-Flash-Next*` SWE-bench Verified
-dirs use the official SWE-bench images instead (`-T
-image_name_template=swebench/sweb.eval.{arch}.{org}_1776_{repo}-{issue}:latest`), which are clean. Reported
-upstream as [UKGovernmentBEIS/inspect_evals#2632](https://github.com/UKGovernmentBEIS/inspect_evals/issues/2632)
-(`inspect_evals` would switch `DEFAULT_IMAGE_TEMPLATE`).
-
-`inspect_evals` declares `swebench>=3.0.15` but its scorer imports `MAP_REPO_VERSION_TO_SPECS` and
-`swebench.harness.test_spec`, which swebench 5.0 removed, so a fresh install resolves 5.x and every sample errors at
-scoring time (swebench 4.1.0 works). Reported as https://github.com/UKGovernmentBEIS/inspect_evals/issues/2545; the
-fix caps the `swe_bench` extra at `swebench<5` on branch `fix/swe-bench-cap-swebench-below-5` of
-https://github.com/eldarkurtic/inspect_evals, which the client venv installs from (see Setup; it resolves swebench
-4.1.0). The results below were produced with inspect_evals 0.20.0 and swebench pinned by hand to 4.1.0, the same
-scorer code. Once the fix is released, install the release instead.
+(1) Solution leak in the default images: `inspect_evals`' default Epoch AI images
+(`ghcr.io/epoch-research/swe-bench.eval.x86_64.<id>`) keep every release tag of the project, thousands of commits
+after the instance's base commit, plus unreachable commit objects, so the reference fix is readable offline (e.g.
+`git show 3.0:django/contrib/auth/validators.py` in django__django-11099). The official SWE-bench images, built with
+the current harness (remote removed, tags newer than the base commit deleted, reflog expired, `gc --prune`), are
+clean except for the matplotlib images, which keep release tags of maintenance branches dated before the base commit.
+Reported upstream as [UKGovernmentBEIS/inspect_evals#2632](https://github.com/UKGovernmentBEIS/inspect_evals/issues/2632);
+`run_eval.sh` selects the official images with `-T image_name_template`. (2) `inspect_evals` declares
+`swebench>=3.0.15` but its scorer needs swebench < 5
+(https://github.com/UKGovernmentBEIS/inspect_evals/issues/2545); fixed on branch
+`fix/swe-bench-cap-swebench-below-5` of https://github.com/eldarkurtic/inspect_evals; the client venv pins swebench
+4.1.0 (same scorer code).
