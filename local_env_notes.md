@@ -10,7 +10,11 @@ Keep them in `local_env_notes.local.md` next to this file, which git ignores, an
 ## Serving
 
 - `local_orchestrator.sh` activates the vLLM venv, starts `serve.sh` in the background, polls `/health`, activates
-  the Inspect venv, runs `run_eval.sh "$@"`, and kills the server.
+  the Inspect venv, runs `run_eval.sh "$@"`, and kills the server. Dirs that source `tools/vllm_server.sh` pick the
+  server environment at run time instead: `VLLM_VENV=<venv dir>` or `VLLM_IMAGE=<podman image>` (not
+  both; with neither, the orchestrator's `DEFAULT_VLLM_IMAGE`), and `INSPECT_VENV=<venv dir>` for the client. The module's podman mode is the NVIDIA
+  pattern below; ROCm hosts (other devices, `numactl`) are not covered yet. `vllm_freeze` prints `pip freeze` of the
+  selected environment for `server_requirements.txt`.
 - Serving convention: `TP=2`, `DP=4` (four replicas behind one port on all 8 GPUs) for ~30B bf16 models on 80 GB
   GPUs. Adjust per model size; a 27–31B bf16 model needs ~26–31 GB per GPU at TP=2. On 288 GB GPUs (MI355X), a 27B
   MXFP4 checkpoint (about 19 GB) runs at `TP=1`, one replica per GPU.
@@ -33,6 +37,30 @@ Keep them in `local_env_notes.local.md` next to this file, which git ignores, an
   history on several replicas, which caused evictions: model calls took ~85 s and 40% of samples hit the 14400 s time
   limit. Sharded, it got ~97% prefix-cache hits and ~20 s per call at 4-7 samples per GPU. Terminal-Bench 2.1 (shorter
   histories, tool-bound) did not need this.
+- Muse Spark Open (`meta-models/Muse-Spark-Open-816B-A42B` and its quantized copies) is not in a vLLM release or nightly
+  wheel: the model lands with vllm-project/vllm#61879 (draft branch `muse-spark-support`, depends on
+  flashinfer-ai/flashinfer#6544), and the recipe points at the image `vllm/vllm-openai:muse-spark-open` (pin it by
+  digest). Build the branch's `docker/Dockerfile` (target `vllm-openai`) into a local image, or install the branch into
+  a venv with `VLLM_USE_PRECOMPILED=1 uv pip install -e .` (precompiled kernels of the nearest main commit). The
+  RedHatAI MXFP4xFP8 checkpoint also needs the compressed-tensors
+  MXFP4-weight / FP8-activation MoE path (vllm-project/vllm#59815, merged 2026-10-14, included in the PR branch); the
+  start-up log must show `CompressedTensorsW4A8Mxfp4MoEMethod`, otherwise the experts run with BF16 activations. The
+  checkpoint is 453 GB: one TP=8 replica with expert parallelism on an 8-GPU H200/B200/B300 node, nothing smaller.
+- Serving from a podman image on NVIDIA (when the vLLM you need is a branch build): give the container the GPUs
+  through the NVIDIA Container Toolkit's CDI spec (`nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml` once per
+  host, then `--device nvidia.com/gpu=all`; `CUDA_VISIBLE_DEVICES` selects GPUs inside), `--ipc host` for NCCL and the
+  TP workers, `--pids-limit -1`, `--init`, `--security-opt label=disable` under SELinux, the port published on
+  `127.0.0.1`, and the task dir and checkpoint mounted at their host paths so `serve.sh` runs unchanged. Mount a host
+  directory on `/root/.cache` to keep the torch.compile and FlashInfer JIT caches across runs, and raise
+  `VLLM_ENGINE_READY_TIMEOUT_S` for the first start. Take `server_requirements.txt` from `pip freeze` inside the image.
+  The same pattern serves a vLLM release: pull `docker.io/vllm/vllm-openai:v<version>` and pin it by digest (query
+  `registry-1.docker.io/v2/vllm/vllm-openai/manifests/v<version>` with an anonymous pull token; the
+  `Docker-Content-Digest` header is the digest). To serve a Hub id from inside the container, mount the host's HF cache
+  (`HF_HOME`) on `/root/.cache/huggingface` and pass `HF_TOKEN` and `HF_HUB_OFFLINE` through; `podman run -e VAR`
+  without a value forwards VAR only when it is set on the host, so unset overrides fall back to `serve.sh`'s defaults.
+  A server that the task sandboxes (Docker) must reach, such as the tau3-bench user simulator, has to be published on
+  all interfaces (`-p PORT:PORT`), not on 127.0.0.1: the sandboxes call the host's primary IP. With rootless podman and
+  rootless Docker on one host, podman serves the models and Docker runs the sandboxes; they do not share images.
 
 ## Serving on AMD (ROCm)
 
@@ -135,9 +163,10 @@ Keep them in `local_env_notes.local.md` next to this file, which git ignores, an
   remaining budget, rather than letting Inspect pull on demand. Inspect skips building an image that already exists
   (inspect_harbor names them `hb__<environment hash>`).
 - `mirror.gcr.io` (Google's Docker Hub pull-through cache) serves the SWE-bench and SWE-bench Pro images without that
-  limit. Take the manifest digest from Docker Hub with a HEAD request (it does not count against the limit), check that
-  the mirror serves the same digest, `docker pull mirror.gcr.io/<repo>@<digest>`, then `docker tag` it to
-  `docker.io/<repo>:<tag>`.
+  limit and without a login. `docker pull mirror.gcr.io/<repo>:<tag>`, then `docker tag` it to `docker.io/<repo>:<tag>`
+  and drop the mirror tag. Docker Hub also counts manifest HEAD requests against the limit (a 429 on
+  `HEAD .../manifests/latest` was seen on 2026-10-21), so comparing the mirror's digest with the Hub's is not free;
+  the SWE-bench image tags are immutable in practice. Four pulls in parallel through the mirror were fine.
 - SWE-bench Verified's default images (Epoch AI's `ghcr.io/epoch-research/swe-bench.eval.x86_64.<instance>`) pull
   anonymously from `ghcr.io`, outside Docker Hub's limit.
 - SWE-bench Pro task images are built `FROM jefzda/sweap-images:<instance>` on Docker Hub. Build them in batches

@@ -56,7 +56,12 @@ which git ignores; read it too if it exists.
   `agentic-and-coding`, `general-tool-usage`, `long-context`, `multimodal`.
 - Every task directory is standalone. No shared includes, nothing to source. Duplication across
   models is deliberate; drift between copies is expected and is the point (each copy documents
-  what ran).
+  what ran). One exception: a `local_orchestrator.sh` may source `tools/vllm_server.sh`, which starts, health-checks
+  and stops vLLM servers from a venv (`VLLM_VENV`) or a podman image (`VLLM_IMAGE`; setting both is an error) and stops them
+  on any exit. It holds only environment glue; what is measured stays in the dir's `serve.sh` and `run_eval.sh`. The
+  orchestrator sets `DEFAULT_VLLM_IMAGE`, used when neither is set, to the image that produced the dir's results, and `logs/serve.log` records the one a run
+  used. The Muse-Spark-Open dirs use it; other dirs still inline their venv or podman commands. Move a dir
+  over when you touch its orchestrator, not as a sweep.
 - `serve.sh` and `run_eval.sh` are plain, readable bash with env-var overrides
   (`MODEL`, `PORT`, `TP`, `DP`, `EPOCHS`, `LOG_DIR`, `MAX_TOKENS`, `MAX_CONNECTIONS`, ...). No
   defensive scaffolding, no logging frameworks, no argument parsers.
@@ -283,6 +288,13 @@ Python.
 - **Completion watchers must not race the eval start.** A `while pgrep inspect-eval` loop started during server
   startup exits immediately (the eval process does not exist yet) and reports a false "finished". Watch the
   orchestrator script's process instead, or start the watcher after samples are in flight.
+- **The card and `generation_config.json` can disagree on a sampling value** (Muse Spark Open: the card says
+  "top_k = disabled", `generation_config.json` sets 64). Rule 2 follows `generation_config.json`, which is also what
+  vLLM applies as the server default when Inspect drops `--top-k`; say so in the README's protocol note.
+- **A compressed-tensors checkpoint with an activation scheme vLLM does not dispatch loads without error** and runs
+  with the wrong activation precision (an MXFP4-weight / FP8-activation MoE loaded as W4A16 before
+  vllm-project/vllm#59815). Check the quantization method vLLM logs at start-up against the checkpoint's
+  `quantization_config` before the smoke test.
 
 ## 10. Conventions established in the task directories
 
@@ -319,6 +331,17 @@ revert these departures:
   - Model loading: vLLM keeps the 51B n-gram table in pinned host memory. Start the two servers one after the
     other, and keep `VLLM_ENGINE_READY_TIMEOUT_S` raised.
   - RedHatAI's server venv carries a vLLM fix from the `eldarkurtic/vllm` fork (see its README).
+- **Muse-Spark-Open dirs** (`RedHatAI_Muse-Spark-Open-816B-A42B-MXFP4xFP8`, 453 GB checkpoint): `serve.sh` sets
+  TP=8 × DP=1 with `--enable-expert-parallel` (the recipe's single-node strategy) for every task, port 8000, 1M
+  context, `muse` reasoning and tool parsers, `--language-model-only` with zero multimodal limits, the Python frontend
+  (the recipe's Rust frontend needs the vllm-rs binary, which a source-built image may lack), and no DSpark speculative
+  decoding (an opt-in recipe feature, default only for Meta's NVFP4 checkpoint). Reasoning effort is a top-level `reasoning_effort` request
+  field (low/medium/high/xhigh, xhigh default) with no enable_thinking kwarg; `--reasoning-effort xhigh` in
+  `run_eval.sh` and `--default-chat-template-kwargs '{"reasoning_effort": "xhigh"}'` in `serve.sh` set it on both
+  sides. Sampling is temperature 1.0, top_p 1.0, top_k 64 (generation_config.json; the card says top_k disabled).
+  Muse Spark support is not in a vLLM release, so `local_orchestrator.sh` runs `serve.sh` inside a podman image built
+  from the vLLM branch (see `local_env_notes.md`) through `tools/vllm_server.sh`; the dirs were created on a host without the GPUs to run them and
+  have no results or requirements files yet.
 - **Serving topology for multi-turn tasks.** swe-bench-*, deepswe-1.1, bfcl, gdpval-aa, tau2-bench and tau3-bench
   export `TP=8 DP=1` in `local_orchestrator.sh` instead of TP=2 × DP=4. vLLM's prefix cache is per replica, and
   DP routes each turn to a random replica, so agent histories would be prefilled again on every turn. `serve.sh`
