@@ -63,7 +63,7 @@ which git ignores; read it too if it exists.
   and stops vLLM servers from a venv (`VLLM_VENV`) or a podman image (`VLLM_IMAGE`; setting both is an error) and stops them
   on any exit. It holds only environment glue; what is measured stays in the dir's `serve.sh` and `run_eval.sh`. The
   orchestrator sets `DEFAULT_VLLM_IMAGE`, used when neither is set, to the image that produced the dir's results, and `logs/serve.log` records the one a run
-  used. The Muse-Spark-Open dirs use it; other dirs still inline their venv or podman commands. Move a dir
+  used. The Muse-Spark-Open and GLM-5.3-Flash pair dirs use it; other dirs still inline their venv or podman commands. Move a dir
   over when you touch its orchestrator, not as a sweep.
 - `serve.sh` and `run_eval.sh` are plain, readable bash with env-var overrides
   (`MODEL`, `PORT`, `TP`, `DP`, `EPOCHS`, `LOG_DIR`, `MAX_TOKENS`, `MAX_CONNECTIONS`, ...). No
@@ -391,6 +391,20 @@ revert these departures:
   Muse Spark support is not in a vLLM release, so `local_orchestrator.sh` runs `serve.sh` inside a podman image built
   from the vLLM branch (see `local_env_notes.md`) through `tools/vllm_server.sh`; the dirs were created on a host without the GPUs to run them and
   have no results or requirements files yet.
+- **GLM-5.3-Flash pair** (`zai-org_GLM-5.3-Flash`, the native FP8 model, and `RedHatAI_GLM-5.3-Flash-MXFP4xFP8`, its
+  MXFP4-weight / FP8-activation quantization): two copies of deepswe-1.1, swe-bench-verified and terminal-bench-2.1,
+  written on 2026-10-27 for a like-for-like comparison on one 8x H200 host. Per task the four files are identical in
+  the two dirs apart from the `MODEL` default and the checkpoint comments; keep them that way (an edit to one copy goes
+  into the other). `serve.sh` takes the base recipe's Hopper flags (one TP=8 replica, MTP with 5 draft tokens, `glm47`
+  parsers, `--no-enable-flashinfer-autotune`) with the KV cache pinned to BF16 (the recipe's `--kv-cache-dtype fp8` is
+  Blackwell-only for this model), `--max-model-len 262144` and `--language-model-only`; served from the
+  `docker.io/vllm/vllm-openai:v0.32.0` podman image (the first release whose registry carries `glm5_next`) through
+  `tools/vllm_server.sh`, the Muse-Spark-Open way; concurrency defaults copied from the
+  `RedHatAI_GLM-5.3-Flash-NVFP4` runs (48 / 48 / 89) with a note to check the KV pool in serve.log first, since BF16 KV
+  halves it. The MXFP4xFP8 checkpoint was not public on 2026-10-27 (uploading under `inference-optimization/`), so
+  the READMEs ask to verify its `quantization_config` and `generation_config.json` and to record the revision before
+  the run. No results or requirements files yet. The `RedHatAI_GLM-5.3-Flash-NVFP4` dirs (B200, vLLM nightly, FP8 KV,
+  TP=4 for swe-bench-verified) are a different run and not part of the pair.
 - **Serving topology for multi-turn tasks.** swe-bench-*, deepswe-1.1, bfcl, tau2-bench and tau3-bench
   export `TP=8 DP=1` in `local_orchestrator.sh` instead of TP=2 × DP=4. vLLM's prefix cache is per replica, and
   DP routes each turn to a random replica, so agent histories would be prefilled again on every turn. `serve.sh`

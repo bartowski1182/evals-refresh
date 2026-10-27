@@ -62,6 +62,13 @@ Keep them in `local_env_notes.local.md` next to this file, which git ignores, an
   MXFP4-weight / FP8-activation MoE path (vllm-project/vllm#59815, merged 2026-10-14, included in the PR branch); the
   start-up log must show `CompressedTensorsW4A8Mxfp4MoEMethod`, otherwise the experts run with BF16 activations. The
   checkpoint is 453 GB: one TP=8 replica with expert parallelism on an 8-GPU H200/B200/B300 node, nothing smaller.
+- GLM-5.3-Flash (`zai-org/GLM-5.3-Flash`, arch `glm5_next`: hybrid KDA linear attention + NoPE sparse MLA, 320B/18B,
+  about 306 GiB of FP8 weights) is in vLLM's model registry from release 0.32.0 (the recipe, older than the release,
+  still asks for a nightly or the `vllm/vllm-openai:glm53-flash` image) and needs FlashInfer 0.6.17 or newer for the
+  sparse-MLA kernels. On Hopper its KV cache must be BF16: the recipe's `--kv-cache-dtype fp8` is a Blackwell-only
+  override ("Hopper runs BF16 KV"), and the Hopper override is `--no-enable-flashinfer-autotune`. The recipe sets
+  `VLLM_ENGINE_READY_TIMEOUT_S=3600`. The checkpoint's 1M default window hits the sparse-indexer warm-up OOM of AGENTS.md
+  section 9 on H200; cap `--max-model-len`.
 - Serving from a podman image on NVIDIA (when the vLLM you need is a branch build): give the container the GPUs
   through the NVIDIA Container Toolkit's CDI spec (`nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml` once per
   host, then `--device nvidia.com/gpu=all`; `CUDA_VISIBLE_DEVICES` selects GPUs inside), `--ipc host` for NCCL and the
