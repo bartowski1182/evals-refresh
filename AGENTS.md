@@ -479,6 +479,10 @@ reuse their client setup.
 **Audit after every run, before you fill Results.** Scan every tool call of every sample in the final `.eval`
 logs. Read `sample.events`, not `sample.messages`: context compaction drops early turns from the messages.
 
+`tools/leak_audit.py` runs this scan (plus the canary check below) over `.eval` files or log dirs and prints every hit
+with the sample's score; run it with the client venv's python, `--offline` for tasks whose agents must have no network,
+`--out hits.jsonl` to keep the hits for hand review. It finds the hits; deciding which are leaks is still yours.
+
 ```python
 import json, re
 from inspect_ai.log import read_eval_log
