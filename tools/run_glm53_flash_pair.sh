@@ -9,12 +9,16 @@
 #   MODELS="zai-org_GLM-5.3-Flash" TASKS="terminal-bench-2.1" tools/run_glm53_flash_pair.sh      a subset
 #   SKIP_SMOKE=1        no smoke tests               ONLY_SMOKE=1   stop after each smoke test
 #   AUTO=1              never pause (continue at every prompt; for an unattended run)
+#   AUTO=done           pause only after each smoke test (to read its samples), not after the full runs
+#   REQUIREMENTS_ONLY=1 only (re)write the two requirements files of the selected dirs from their logs/serve.log
 #   RUN_ARGS="..."      extra args for every full run (e.g. --sandbox-prebuilt)
 #   INSPECT_VENV_DEEPSWE / INSPECT_VENV_SWEBENCH / INSPECT_VENV_TB    client venvs (defaults = the orchestrators')
 #   MODEL_PATH_FP8 / MODEL_PATH_MXFP4XFP8    local checkpoint copies (else the Hub id through HF_HOME; export
 #                                            HF_HUB_OFFLINE=1 once downloaded)
 #   VLLM_VENV or VLLM_IMAGE, HF_HOME, HF_TOKEN, DOCKER_HOST, PORT, MAX_CONNECTIONS, ...   pass through as usual
 # At a prompt: c = continue, s = skip the rest of this task, q = quit (the server is already stopped by then).
+# The pauses exist because AGENTS.md asks to read the smoke samples before every full run; AUTO=1 is for runs you
+# have already checked once (e.g. the second model of the pair).
 set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MODELS="${MODELS:-zai-org_GLM-5.3-Flash RedHatAI_GLM-5.3-Flash-MXFP4xFP8}"
@@ -36,8 +40,8 @@ model_path_for() {
   esac
 }
 
-ask() {  # sets REPLY to c, s or q
-  if [ "${AUTO:-0}" = 1 ]; then REPLY=c; return; fi
+ask() {  # $1 = prompt, $2 = kind (smoke|done); sets REPLY to c, s or q
+  if [ "${AUTO:-0}" = 1 ] || { [ "${AUTO:-0}" = done ] && [ "$2" = done ]; }; then REPLY=c; return; fi
   while true; do
     read -r -p "$1 [c]ontinue / [s]kip rest of this task / [q]uit: " REPLY
     case "$REPLY" in c|s|q) return ;; esac
@@ -73,6 +77,12 @@ for f in sorted(glob.glob(sys.argv[1] + "/*.eval")):
 PY
 }
 
+freeze_python() {  # $1 = python interpreter; pip freeze, or uv's for a venv made with `uv venv` (no pip module)
+  if "$1" -m pip --version >/dev/null 2>&1; then "$1" -m pip freeze
+  elif command -v uv >/dev/null; then uv pip freeze --python "$1"
+  else echo "neither pip nor uv available to freeze $1" >&2; return 1; fi
+}
+
 write_requirements() {  # headers as in the other dirs: date, GPUs, OS, driver, CUDA, Python
   local date gpus driver cuda os env_line env_kind env_ref spy cpy
   date=$(date +%F)
@@ -87,7 +97,7 @@ write_requirements() {  # headers as in the other dirs: date, GPUs, OS, driver, 
     spy=$("$env_ref/bin/python" --version 2>&1)
     { echo "# vLLM serving env (serve.sh). Generated $date with pip freeze from the venv that ran the eval."
       echo "# Host: $gpus, $os, NVIDIA driver $driver, $cuda, $spy."
-      "$env_ref/bin/python" -m pip freeze; } > server_requirements.txt
+      freeze_python "$env_ref/bin/python"; } > server_requirements.txt
   else
     spy=$(podman run --rm --entrypoint python3 "$env_ref" --version 2>&1)
     { echo "# vLLM serving env (serve.sh). Generated $date with pip freeze inside the podman image that ran the eval ($env_ref)."
@@ -97,8 +107,8 @@ write_requirements() {  # headers as in the other dirs: date, GPUs, OS, driver, 
   cpy=$("$INSPECT_VENV/bin/python" --version 2>&1)
   { echo "# Inspect eval client env (run_eval.sh). Generated $date with pip freeze from the venv that ran the eval."
     echo "# Host: $os, $cpy."
-    "$INSPECT_VENV/bin/python" -m pip freeze; } > client_requirements.txt
-  echo "wrote server_requirements.txt and client_requirements.txt"
+    freeze_python "$INSPECT_VENV/bin/python"; } > client_requirements.txt
+  echo "wrote server_requirements.txt ($(grep -c == server_requirements.txt) packages) and client_requirements.txt ($(grep -c == client_requirements.txt) packages)"
 }
 
 run_one() {
@@ -109,6 +119,10 @@ run_one() {
   [ -x "$INSPECT_VENV/bin/python" ] || { echo "client venv $INSPECT_VENV missing (see $dir/README.md, Setup)" >&2; exit 1; }
   mp=$(model_path_for "$model"); if [ -n "$mp" ]; then export MODEL_PATH="$mp"; else unset MODEL_PATH; fi
   echo; echo "################ $model / $task  ($(date))"; echo
+  if [ "${REQUIREMENTS_ONLY:-0}" = 1 ]; then
+    [ -f logs/serve.log ] || { echo "no logs/serve.log in $dir to read the server environment from" >&2; return; }
+    write_requirements; return
+  fi
 
   if [ "${SKIP_SMOKE:-0}" != 1 ]; then
     wait_gpus_idle || exit 1
@@ -121,7 +135,7 @@ run_one() {
     echo "Read the samples (another shell: inspect view --log-dir $dir/logs/smoke). Check: reasoning parsed into a"
     echo "separate part, stop_reason=stop, the intended config recorded, and in logs/serve.log the quantization"
     echo "method, KV cache dtype (bfloat16), MTP, and the GPU KV cache size against the task's concurrency."
-    ask "Start the full run of $model / $task?"
+    ask "Start the full run of $model / $task?" smoke
     case "$REPLY" in s) return ;; q) exit 0 ;; esac
     [ "${ONLY_SMOKE:-0}" = 1 ] && return
   fi
@@ -141,7 +155,7 @@ run_one() {
   echo "full audit output in $dir/logs/leak_audit.txt; review the hits by hand (section 11 lists what counts as a leak)"
 
   write_requirements
-  ask "Done with $model / $task."
+  ask "Done with $model / $task." done
   case "$REPLY" in q) exit 0 ;; esac
 }
 
