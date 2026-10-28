@@ -211,5 +211,7 @@ Setup gives the commands), name and place them as you like, and point `local_orc
   commit in `pip freeze`.
 - The superseded earlier DeepSWE runs of the Qwen3.8-27B dirs (before the comparison set of 2026-10-21) used stock
   inspect-harbor 1.0.0, for its verifier fixes, without the network fix. Don't reuse that setup for new DeepSWE runs.
+- A venv made with `uv venv` has no `pip` module, so `python -m pip freeze` fails with "No module named pip"; freeze
+  it with `uv pip freeze --python <venv>/bin/python` (`tools/run_glm53_flash_pair.sh` tries pip, then uv).
 - A `client_requirements.txt` that contains litellm next to `openai==3.14.0` installs only with
   `pip install --no-deps -r client_requirements.txt`; a resolving install fails on litellm's `openai<3` pin.
