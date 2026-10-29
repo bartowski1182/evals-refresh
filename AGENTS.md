@@ -156,9 +156,14 @@ log.results.scores                  # accuracy, stderr
 log.stats.model_usage               # run totals: input / output / reasoning tokens
 for s in log.samples:
     s.output.usage                  # per-sample tokens (reasoning counted separately)
-    s.output.stop_reason            # "stop" or "max_tokens"
+    s.output.stop_reason            # "stop" or "max_tokens"; raises IndexError on an errored sample (no choices)
     s.scores, s.error, s.limit      # verdict, infra error, time/message limit hit
 ```
+
+`tools/collect_results.py` does this for many task dirs at once: run it with the client venv's python on model or task
+dirs, and it reads the newest `.eval` in each `logs/`, prints a summary table grouped by task (all-samples accuracy and
+stderr next to Inspect's errors-excluded figure, errors, truncations, limit hits), and with `--detail` the README
+Results block of each dir.
 
 If a run is interrupted, `inspect eval-retry logs/<file>.eval` reruns only unfinished samples and
 keeps completed ones. It reuses the log's task and args; env vars still apply.
