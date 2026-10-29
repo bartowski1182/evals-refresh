@@ -17,13 +17,16 @@ samples make many), from sample.model_usage; samples that errored before any mod
 """
 import argparse
 import glob
+import json
 import math
 import os
 import statistics
 import sys
+import time
+import zipfile
 from collections import defaultdict
 
-from inspect_ai.log import read_eval_log, read_eval_log_samples
+from inspect_ai.log import read_eval_log, read_eval_log_sample_summaries
 from inspect_ai.scorer import value_to_float
 
 to_float = value_to_float()
@@ -58,27 +61,39 @@ def stats3(xs):
     return (statistics.mean(xs), statistics.median(xs), max(xs)) if xs else (0, 0, 0)
 
 
+def count_truncated(path):
+    # stop_reason is not in the sample summaries; plain json.loads of each sample is far faster than building the
+    # full EvalSample objects (all messages and events), which takes hours on agentic or 12k-sample logs
+    n = 0
+    with zipfile.ZipFile(path) as z:
+        for name in z.namelist():
+            if name.startswith("samples/") and name.endswith(".json"):
+                choices = (json.loads(z.read(name)).get("output") or {}).get("choices") or []
+                n += bool(choices and choices[0].get("stop_reason") == "max_tokens")
+    return n
+
+
 def collect(path):
     head = read_eval_log(path, header_only=True)
     scorer = head.results.scores[0].name if head.results and head.results.scores else None
     epochs = head.eval.config.epochs or 1
     per_id = defaultdict(dict)  # id -> epoch -> score
-    n_err = n_trunc = n_unscored = 0
+    n_err = n_unscored = 0
     limits = defaultdict(int)
     tok = {"input": [], "output": [], "reasoning": []}
-    for s in read_eval_log_samples(path, all_samples_required=False):
+    for s in read_eval_log_sample_summaries(path):
         per_id[s.id][s.epoch] = score_value(s, scorer)
         n_err += bool(s.error)
         n_unscored += not s.error and not s.scores
-        n_trunc += bool(s.output and s.output.choices and s.output.stop_reason == "max_tokens")
         if s.limit:
-            limits[s.limit.type] += 1
+            limits[s.limit] += 1
         usage = (s.model_usage or {}).values()
         if not usage:  # errored before any model call
             continue
         tok["input"].append(sum(u.input_tokens or 0 for u in usage))
         tok["output"].append(sum(u.output_tokens or 0 for u in usage))
         tok["reasoning"].append(sum(u.reasoning_tokens or 0 for u in usage))
+    n_trunc = count_truncated(path)
     ids = list(head.eval.dataset.sample_ids or []) or list(per_id)
     sample_means = [sum(per_id.get(i, {}).get(e, 0.0) for e in range(1, epochs + 1)) / epochs for i in ids]
     n = len(sample_means)
@@ -146,10 +161,13 @@ def main():
         if not path:
             rows.append((d, None, "no .eval log"))
             continue
+        t0 = time.time()
+        print(f"reading {path} ({os.path.getsize(path) / 1e9:.2f} GB)...", end=" ", file=sys.stderr, flush=True)
         try:
             rows.append((d, collect(path), f"{n_logs} .eval logs, newest used" if n_logs > 1 else ""))
         except Exception as e:
             rows.append((d, None, f"failed to read {path}: {e}"))
+        print(f"{time.time() - t0:.0f}s", file=sys.stderr)
     if not rows:
         sys.exit("no task dirs (dirs with run_eval.sh) found under the arguments")
 
