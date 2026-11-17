@@ -9,6 +9,10 @@ Keep them in `local_env_notes.local.md` next to this file, which git ignores, an
 
 ## Serving
 
+- Cursor agent shells on some hosts run in a mount namespace without `/dev/nvidia*` even when the NVIDIA driver is
+  loaded (`/proc/driver/nvidia/gpus` is visible, `nvidia-smi` fails). GPU serves and evals must be launched from an
+  interactive terminal, or from an agent command that actually has unsandboxed/`all` permissions. Check with
+  `ls /dev/nvidia*` before starting `serve.sh`.
 - `local_orchestrator.sh` activates the vLLM venv, starts `serve.sh` in the background, polls `/health`, activates
   the Inspect venv, runs `run_eval.sh "$@"`, and kills the server. Dirs that source `tools/vllm_server.sh` pick the
   server environment at run time instead: `VLLM_VENV=<venv dir>` or `VLLM_IMAGE=<podman image>` (not
@@ -196,6 +200,9 @@ Keep them in `local_env_notes.local.md` next to this file, which git ignores, an
 Environments are local to each user and server: create them from the task dir's `client_requirements.txt` (its README
 Setup gives the commands), name and place them as you like, and point `local_orchestrator.sh` at them.
 
+- For any new `inspect_evals` client env, install with
+  `pip install git+https://github.com/neuralmagic/inspect_evals.git openai` (not `pip install inspect-evals` from
+  PyPI). See `AGENTS.md` section 4. Reproducing an existing dir still uses that dir's `client_requirements.txt`.
 - SWE-bench Verified dirs that pin inspect-ai 0.3.263, inspect-evals 0.20.0 and swebench 4.1.0 need an environment of
   their own: inspect_evals' scorer breaks under swebench 5 (see those READMEs' Patches).
 - DeepSWE and SWE-bench Pro dirs that run the `eldarkurtic/inspect_harbor@fix/enforce-agent-network-mode` fork

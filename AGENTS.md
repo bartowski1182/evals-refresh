@@ -126,11 +126,15 @@ them as you like, and point `local_orchestrator.sh` at them; it is the only file
 | environment | used by | create with |
 |---|---|---|
 | vLLM server | `serve.sh` | `pip install vllm` |
-| Inspect client for `inspect_evals` tasks | `run_eval.sh` | `pip install inspect-evals openai` |
+| Inspect client for `inspect_evals` tasks | `run_eval.sh` | `pip install git+https://github.com/neuralmagic/inspect_evals.git openai` |
 | Inspect client for `inspect_harbor` tasks | `run_eval.sh` | `pip install inspect-harbor httpx2 "openai==3.14.0"` |
 
-These installs are the starting point for a new task. To reproduce a dir's results, create the environments from its
-`server_requirements.txt` and `client_requirements.txt` instead, as its README Setup shows.
+Always install `inspect_evals` from `github.com/neuralmagic/inspect_evals` (not PyPI). That fork is this repo's
+source of truth for task definitions and carries tasks and fixes that are not on a PyPI release yet (e.g. MRCR).
+Pin a commit or branch in the task README and `client_requirements.txt` when a dir needs a specific revision;
+otherwise `main` is fine for a new env. These installs are the starting point for a new task. To reproduce a
+dir's results, create the environments from its `server_requirements.txt` and `client_requirements.txt` instead,
+as its README Setup shows.
 
 `inspect-harbor` depends on `litellm`, which pins `openai<3`, while Inspect's OpenAI-compatible
 providers need `openai>=3`; installing `openai==3.14.0` last overrides the pin and the resulting
@@ -389,9 +393,10 @@ revert these departures:
   Qwen dirs need neither, because `--reasoning-effort xhigh` does the job. The Gemma recipe URL is
   `https://recipes.vllm.ai/Google/gemma-4-31B-it`: capital `G`, although the HF org is `google`.
 - **Each dir pins its own client packages.**
+  - inspect_evals: always from `pip install git+https://github.com/neuralmagic/inspect_evals.git` (section 4).
+    Some dirs pin a fix branch or commit of that fork (bfcl, older swe-bench-verified) instead of `main`.
   - inspect_harbor: 0.7.5, 0.7.6, 1.0.0, or a git commit (tau3-bench; the Flash-Next swe-bench-pro and
     deepswe-1.1 dirs).
-  - bfcl and the older swe-bench-verified dirs install inspect_evals from `neuralmagic/inspect_evals` fork branches.
 
   Before a run, create the client environment from the dir's `client_requirements.txt` and README Setup, or check
   that an environment you already have matches it.
