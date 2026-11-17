@@ -39,6 +39,11 @@ Keep them in `local_env_notes.local.md` next to this file, which git ignores, an
   about 1.1 TB of RAM and evict the page cache. Start the servers one after the other.
 - On a shared host, check `nvidia-smi` (`amd-smi` on AMD) before claiming GPUs. Stop processes by exact PID:
   `pgrep -f`/`pkill -f` patterns can match other users' processes or your own shell.
+- **`nvidia-smi` idle at 0 MiB is not enough to claim a GPU.** Some B200s return `CUDA_ERROR_UNKNOWN` from
+  `cuDevicePrimaryCtxRetain` / `torch.cuda.set_device` while looking free (no process, Default compute mode). Probe
+  each intended device with a one-line `CUDA_VISIBLE_DEVICES=<id> python -c 'import torch; torch.cuda.set_device(0);
+  torch.zeros(1, device="cuda")'` before starting DP. GPU reset needs root (`nvidia-smi -r` fails with Insufficient
+  Permissions for a normal user).
 - `amd-smi` can number GPUs differently from HIP (`HIP_VISIBLE_DEVICES`). Once, with HIP devices 0 and 1 free,
   `amd-smi` showed GPUs 0 and 3 idle. Find the free HIP devices from the `HIP_VISIBLE_DEVICES` of the running servers
   (e.g. `podman inspect` on their containers), not from the `amd-smi` index.

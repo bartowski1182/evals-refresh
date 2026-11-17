@@ -326,6 +326,23 @@ Python.
   with the wrong activation precision (an MXFP4-weight / FP8-activation MoE loaded as W4A16 before
   vllm-project/vllm#59815). Check the quantization method vLLM logs at start-up against the checkpoint's
   `quantization_config` before the smoke test.
+- **MRCR's `max_model_len` HF auto-detect misses nested `text_config.max_position_embeddings`.** Qwen3.8
+  multimodal configs put the window under `text_config`, so `infer_vllm_max_model_len`'s Hugging Face step returns
+  nothing; the `/v1/models` fallback only helps if the server is already up and reachable during task build. Pass
+  `-T max_model_len=<served window>` explicitly (e.g. 262144 for the native window).
+- **Do not export `HF_HUB_OFFLINE=1` to the Inspect client for MRCR.** The server needs it so DP workers do not 429
+  the Hub while loading a pre-cached checkpoint, but the client still loads `openai/mrcr` (and the model tokenizer)
+  through Hugging Face. Scope offline mode to the server subprocess only. Also leave the client's `HF_HUB_CACHE` /
+  `HF_HOME` alone when the server points at a shared host cache that is not writable by the eval user: the client
+  still needs a writable hub home for `openai/mrcr` and tiktoken; pointing it at a read-only shared cache breaks
+  dataset download. Symlink only the model weights into the client's hub cache if needed.
+- **Unset HTTP(S)_PROXY for the MRCR client when the proxy 403s Hugging Face / tiktoken.** Corporate proxies that
+  allow the Hub for the server path can still reject the client's tokenizer bootstrap. Clear proxy vars for the
+  Inspect process (not necessarily for the whole shell).
+- **MRCR concurrency follows the KV pool, same as agentic tasks.** On one B200 at `max_model_len=262144`, BF16
+  Qwen3.8-27B holds ~1.83M KV tokens per DP replica (~7× at full window) while the NVFP4 sibling holds ~4.43M;
+  this dir used `--max-connections 16` for BF16 vs 32 for NVFP4. Read "GPU KV cache size" in serve.log before
+  copying the sibling's concurrency.
 
 ## 10. Conventions established in the task directories
 
