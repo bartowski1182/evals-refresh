@@ -5,8 +5,8 @@ set -euo pipefail
 
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-2,3,6,7}"
 export PORT="${PORT:-8000}"
-# Server uses the default HF hub cache (weights downloaded there; /data/hub_cache is not
-# writable by this user). Do not export HF_HUB_OFFLINE to the Inspect client.
+# Server uses the default HF hub cache (weights under ~/.cache/huggingface/hub).
+# Do not export HF_HUB_OFFLINE to the Inspect client.
 export VLLM_ENGINE_READY_TIMEOUT_S="${VLLM_ENGINE_READY_TIMEOUT_S:-1800}"
 mkdir -p logs
 

@@ -1,4 +1,4 @@
-# Inspect eval client env (run_eval.sh). Generated 2026-11-17 with `pip freeze` from the venv that ran the eval.
+# Inspect eval client env (run_eval.sh). Generated 2026-11-18 with `pip freeze` from the venv that ran the eval.
 # Host: 8x NVIDIA B200 183GB, driver 610.43.02, CUDA 13.3 (nvidia-smi UMD), Python 3.12.13
 # inspect_evals pinned at neuralmagic/inspect_evals@e64c20fd (update_mrcr).
 agent-client-protocol==1.0.0

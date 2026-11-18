@@ -1,4 +1,4 @@
-# vLLM serving env (serve.sh). Generated 2026-11-17 with `uv pip freeze` from the venv that ran the eval.
+# vLLM serving env (serve.sh). Generated 2026-11-18 with `uv pip freeze` from the venv that ran the eval.
 # Host: 8x NVIDIA B200 183GB, driver 610.43.02, CUDA 13.3 (nvidia-smi UMD), Python 3.12.13
 # CUDA-flavored wheels need the matching PyTorch extra index URL to reinstall.
 agent-client-protocol==0.12.1
