@@ -126,11 +126,15 @@ them as you like, and point `local_orchestrator.sh` at them; it is the only file
 | environment | used by | create with |
 |---|---|---|
 | vLLM server | `serve.sh` | `pip install vllm` |
-| Inspect client for `inspect_evals` tasks | `run_eval.sh` | `pip install inspect-evals openai` |
+| Inspect client for `inspect_evals` tasks | `run_eval.sh` | `pip install git+https://github.com/neuralmagic/inspect_evals.git openai` |
 | Inspect client for `inspect_harbor` tasks | `run_eval.sh` | `pip install inspect-harbor httpx2 "openai==3.14.0"` |
 
-These installs are the starting point for a new task. To reproduce a dir's results, create the environments from its
-`server_requirements.txt` and `client_requirements.txt` instead, as its README Setup shows.
+Always install `inspect_evals` from `github.com/neuralmagic/inspect_evals` (not PyPI). That fork is this repo's
+source of truth for task definitions and carries tasks and fixes that are not on a PyPI release yet (e.g. MRCR).
+Pin a commit or branch in the task README and `client_requirements.txt` when a dir needs a specific revision;
+otherwise `main` is fine for a new env. These installs are the starting point for a new task. To reproduce a
+dir's results, create the environments from its `server_requirements.txt` and `client_requirements.txt` instead,
+as its README Setup shows.
 
 `inspect-harbor` depends on `litellm`, which pins `openai<3`, while Inspect's OpenAI-compatible
 providers need `openai>=3`; installing `openai==3.14.0` last overrides the pin and the resulting
@@ -322,6 +326,23 @@ Python.
   with the wrong activation precision (an MXFP4-weight / FP8-activation MoE loaded as W4A16 before
   vllm-project/vllm#59815). Check the quantization method vLLM logs at start-up against the checkpoint's
   `quantization_config` before the smoke test.
+- **MRCR's `max_model_len` HF auto-detect misses nested `text_config.max_position_embeddings`.** Qwen3.8
+  multimodal configs put the window under `text_config`, so `infer_vllm_max_model_len`'s Hugging Face step returns
+  nothing; the `/v1/models` fallback only helps if the server is already up and reachable during task build. Pass
+  `-T max_model_len=<served window>` explicitly (e.g. 262144 for the native window).
+- **Do not export `HF_HUB_OFFLINE=1` to the Inspect client for MRCR.** The server needs it so DP workers do not 429
+  the Hub while loading a pre-cached checkpoint, but the client still loads `openai/mrcr` (and the model tokenizer)
+  through Hugging Face. Scope offline mode to the server subprocess only. Also leave the client's `HF_HUB_CACHE` /
+  `HF_HOME` alone when the server points at a shared host cache that is not writable by the eval user: the client
+  still needs a writable hub home for `openai/mrcr` and tiktoken; pointing it at a read-only shared cache breaks
+  dataset download. Symlink only the model weights into the client's hub cache if needed.
+- **Unset HTTP(S)_PROXY for the MRCR client when the proxy 403s Hugging Face / tiktoken.** Corporate proxies that
+  allow the Hub for the server path can still reject the client's tokenizer bootstrap. Clear proxy vars for the
+  Inspect process (not necessarily for the whole shell).
+- **MRCR concurrency follows the KV pool, same as agentic tasks.** On one B200 at `max_model_len=262144`, BF16
+  Qwen3.8-27B holds ~1.83M KV tokens per DP replica (~7× at full window) while the NVFP4 sibling holds ~4.43M;
+  this dir used `--max-connections 16` for BF16 vs 32 for NVFP4. Read "GPU KV cache size" in serve.log before
+  copying the sibling's concurrency.
 
 ## 10. Conventions established in the task directories
 
@@ -389,9 +410,10 @@ revert these departures:
   Qwen dirs need neither, because `--reasoning-effort xhigh` does the job. The Gemma recipe URL is
   `https://recipes.vllm.ai/Google/gemma-4-31B-it`: capital `G`, although the HF org is `google`.
 - **Each dir pins its own client packages.**
+  - inspect_evals: always from `pip install git+https://github.com/neuralmagic/inspect_evals.git` (section 4).
+    Some dirs pin a fix branch or commit of that fork (bfcl, older swe-bench-verified) instead of `main`.
   - inspect_harbor: 0.7.5, 0.7.6, 1.0.0, or a git commit (tau3-bench; the Flash-Next swe-bench-pro and
     deepswe-1.1 dirs).
-  - bfcl and the older swe-bench-verified dirs install inspect_evals from `neuralmagic/inspect_evals` fork branches.
 
   Before a run, create the client environment from the dir's `client_requirements.txt` and README Setup, or check
   that an environment you already have matches it.

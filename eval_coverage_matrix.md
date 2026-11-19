@@ -37,7 +37,7 @@ and results are in `<org>_<model>/<category>/<task>/README.md`. Sorted by how ma
 | 3 | OSWorld-Verified | general-tool-usage | computer-use | agent |  | inspect_harbor | xlang_ai_osworld_verified  (+ native osworld) | Kimi-K3, Nex-N2.5, Qwen3.8 |
 | 3 | ProgramBench | agentic-and-coding | swe-agent | agent |  | inspect_harbor | bencalvert04_programbench | DeepSeek-V4, GLM-5.x, Kimi-K3 |
 | 3 | MMMU-Pro | multimodal | vision-reasoning | none |  | PARTIAL | mmmu (base MMMU only, not Pro) | DeepSeek-V4, Gemma-4, Kimi-K3 |
-| 3 | MRCR | long-context | long-context | none |  | PARTIAL | niah (needle-in-haystack) is nearest | DeepSeek-V4, Gemma-4, Qwen3.8 |
+| 3 | MRCR | long-context | long-context | none | ✅ | inspect_evals | mrcr (+ mrcr_2needle/4needle/8needle; neuralmagic/inspect_evals) | DeepSeek-V4, Gemma-4, Qwen3.8 |
 | 3 | SWE-bench Multilingual | agentic-and-coding | swe-agent | agent |  | PARTIAL | swe_bench(dataset=...) or harbor abundant_swe_gen_* | DeepSeek-V4, Granite-4.2, Nemotron-3.x |
 | 3 | AA-LCR | long-context | long-context | none |  | MISSING | Artificial Analysis proprietary | Kimi-K3, MiniCPM5, Nemotron-3.x |
 | 3 | BabyVision | multimodal | vision-perception | none |  | MISSING | NOT IMPLEMENTED | DeepSeek-V4, Kimi-K3, Qwen3.8 |
@@ -394,14 +394,14 @@ Status: ✔ runnable, ~ partial (substitute only), ✗ missing. `#` = families r
 |---|---|---|---|---|---|
 | ✔ | 1 | HealthBench | none | healthbench |  |
 
-### LONG-CONTEXT  (0/7 runnable) — retrieval and reasoning over very long inputs
+### LONG-CONTEXT  (1/7 runnable) — retrieval and reasoning over very long inputs
 
-#### long-context (0/7 runnable) — retrieval and reasoning over very long inputs
+#### long-context (1/7 runnable) — retrieval and reasoning over very long inputs
 
 | status | # | Benchmark | Exec | Registry task / note | Repo |
 |---|---|---|---|---|---|
 | ~ | 4 | LongBench v2 | none |  |  |
-| ~ | 3 | MRCR | none |  |  |
+| ✔ | 3 | MRCR | none | mrcr (+ mrcr_2needle / mrcr_4needle / mrcr_8needle) | ✅ |
 | ✗ | 3 | AA-LCR | none |  |  |
 | ✗ | 2 | RULER | none |  |  |
 | ✗ | 1 | CorpusQA 1M | none |  |  |
