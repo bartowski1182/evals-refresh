@@ -28,6 +28,13 @@ repository was not public when this dir was written (2026-10-27; it was being up
 `config.json` declares MXFP4 weights with dynamic FP8 input activations (and which layers it covers: experts only, or
 dense linear layers too), that its `generation_config.json` matches the base model's (temperature 1.0, top_p 0.95,
 no top_k), and record the revision here. The KV cache is BF16 on Hopper for both models of the pair (see `serve.sh`).
+Evaluated: `inference-optimization/GLM-5.3-Flash-MXFP4xFP8` revision `d5ea13e50a801fe297dc79a3953dcc0203852ba3`
+(the corrected `config.json` described under Patches; weights unchanged from `662b3cc`; served from a local copy via
+`MODEL_PATH`, under the served name `RedHatAI/GLM-5.3-Flash-MXFP4xFP8`). Experts: MXFP4 weights (group 32) with dynamic per-group FP8 activations;
+dense MLP, shared experts and the MLA projections of every fourth layer: FP8 block weights with dynamic FP8
+activations; everything else as in the base model. `generation_config.json`, chat template and tokenizer are
+byte-identical to zai-org/GLM-5.3-Flash. vLLM loads the experts with `CompressedTensorsW4A8Mxfp4MoEMethod` on the
+Humming MXFP4 MoE backend (FP8 activation schema, no fallback) and the dense layers with `CompressedTensorsW8A8Fp8`.
 
 ## Files
 
@@ -43,7 +50,7 @@ no top_k), and record the revision here. The KV cache is BF16 on Hopper for both
   verifier fix (see Patches).
 - `server_requirements.txt` / `client_requirements.txt` — `pip freeze` of the vLLM server environment and of the
   Inspect venv that produce the results, with the host (GPUs, driver, CUDA, Python) in the header. Written after the
-  final run; not present yet.
+  final run.
 - `local_orchestrator.sh` — runs everything in your local dev environment: starts `serve.sh` from the vLLM podman
   image (`VLLM_IMAGE`, by default the pinned one) or a venv (`VLLM_VENV`) through `tools/vllm_server.sh` (GPUs 0-7,
   port 8000, one TP=8 replica, the HF cache and the task dir mounted in podman mode), points Docker at the rootless
@@ -120,9 +127,6 @@ Always smoke-test first: `./local_orchestrator.sh --limit 2`
 
 ## Results
 
-Not run yet. `run_eval.sh` records the configuration below; fill the tables from the final `.eval` log (AGENTS.md,
-section 5) after the leak audit of section 11, with sample errors counted as failures.
-
 With model generation config:
 
 `temperature=1.0, top_p=0.95, top_k unset, reasoning_effort=max, max_tokens=65536 (per turn), no message limit, max_connections=48, max_sandboxes=48, time_limit=14400s, client_timeout=7200, tool_timeout=300s, override_cpus=0, kv_cache_dtype=bfloat16, TP=8 DP=1 with MTP (num_speculative_tokens=5), max_model_len=262144, epochs=1`
@@ -131,14 +135,35 @@ the following scores and token stats are obtained:
 
 | metric | value |
 |---|---|
-| | |
+| accuracy (pass@1, all samples) | 0.593 (67 of 113) |
+| stderr | 0.046 |
+| samples | 113 × 1 epoch |
+| truncated (max_tokens) | 0 |
+| time-limit hits | 0 |
+| sample errors | 1 (counted as a failure) |
+| solution leaks (section 11 audit) | 0 (91 outbound attempts, none reached the network) |
 
 | tokens / sample | input | output | reasoning |
 |---|---|---|---|
-| | | | |
+| mean | 12,597,210 | 97,108 | 60,622 |
+| median | 8,581,293 | 91,831 | 58,669 |
+| max | 183,263,910 | 288,297 | 184,386 |
+
+Input tokens are summed over all turns of a sample (each turn resends the history; most of it is served from the
+prefix cache). Reasoning tokens are part of the output tokens. Sample error: `datacurve/scriggo-method-declarations`
+(`Compaction insufficient: 255,584 tokens still exceeds threshold of 235,929`, Inspect's ReAct compaction; the same
+sample errors the same way for the base model).
 
 ## Patches for upstream
 
+- **Checkpoint `config.json` (fixed in the model repo at `d5ea13e`).** The `dense` group's first two
+  targets were anchored on the checkpoint's module path (`re:.*language_model\.layers\....`), but vLLM matches `re:`
+  targets against its own module names (`language_model.model.layers....`) and does not remap regexes, so those
+  layers were built unquantized and loading failed with `KeyError: 'layers.0.mlp.down_proj.weight_scale'`. The
+  fix drops the `language_model\.` anchor:
+  `re:.*layers\.(3|7|11|15|19|23|27|31|35|39|43|45)\.self_attn\.(q_a_proj|q_b_proj|kv_a_proj_with_mqa|o_proj)$` and
+  `re:.*layers\.\d+\.mlp\.(gate|up|down)_proj$`. Weights are unchanged; every non-expert module with a `weight_scale`
+  in the checkpoint matches a target and none without one does.
 - **The task's own network policy was not enforced.** Every DeepSWE `task.toml` declares `[agent]` and `[verifier]`
   `network_mode = "no-network"`, but inspect_harbor 1.0 reads network policy only from `[environment]`, so agents get
   public internet. Fixed on branch [`fix/enforce-agent-network-mode`](https://github.com/eldarkurtic/inspect_harbor/tree/fix/enforce-agent-network-mode)

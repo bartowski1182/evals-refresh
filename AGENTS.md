@@ -348,6 +348,14 @@ Python.
   Qwen3.8-27B holds ~1.83M KV tokens per DP replica (~7× at full window) while the NVFP4 sibling holds ~4.43M;
   this dir used `--max-connections 16` for BF16 vs 32 for NVFP4. Read "GPU KV cache size" in serve.log before
   copying the sibling's concurrency.
+- **compressed-tensors `re:` targets are matched against vLLM's module names, not the checkpoint's.** vLLM 0.32.0's
+  `apply_vllm_mapper` rewrites plain layer paths in a quantization config through the model's `hf_to_vllm_mapper` but
+  leaves `re:` patterns as written. GLM-5.3-Flash checkpoints store `model.language_model.layers.N...` while vLLM names
+  the modules `language_model.model.layers.N...`, so an LLM Compressor target like
+  `re:.*language_model\.layers\.\d+\.mlp\.(gate|up|down)_proj$` matches nothing: those layers are built unquantized
+  and loading fails with `KeyError: 'layers.0.mlp.down_proj.weight_scale'`. Fix the checkpoint's regexes so they do
+  not depend on the prefix (`re:.*layers\.\d+\.mlp\...`), then check offline that every non-expert module with a
+  `weight_scale` in `model.safetensors.index.json` matches a target and none without one does.
 
 ## 10. Conventions established in the task directories
 
@@ -408,7 +416,13 @@ revert these departures:
   `RedHatAI_GLM-5.3-Flash-NVFP4` runs (48 / 48 / 89) with a note to check the KV pool in serve.log first, since BF16 KV
   halves it. The MXFP4xFP8 checkpoint was not public on 2026-10-27 (uploading under `inference-optimization/`), so
   the READMEs ask to verify its `quantization_config` and `generation_config.json` and to record the revision before
-  the run. No results or requirements files yet. The `RedHatAI_GLM-5.3-Flash-NVFP4` dirs (B200, vLLM nightly, FP8 KV,
+  the run. Both dirs ran on 2026-10-27/28 (FP8) and 2026-11-10/11 (MXFP4xFP8) at the defaults (KV pool 6.5M and 7.9M
+  tokens, enough for 48 / 48 / 89). The MXFP4xFP8 run used `inference-optimization/GLM-5.3-Flash-MXFP4xFP8` @ `662b3cc`
+  served from a local copy whose `config.json` regexes were fixed (section 9, compressed-tensors `re:` targets); the
+  fix is in the model repo at `d5ea13e` (only `config.json` changed), the revision the READMEs record, under the served name `RedHatAI/GLM-5.3-Flash-MXFP4xFP8`. The pair also carries gpqa-diamond (3 epochs), aime-2026 (8) and mmlu-pro (1), added on
+  2026-11-19 at the user's request (epochs too): same `serve.sh` and orchestrator as the agentic dirs (one TP=8
+  replica, MTP, BF16 KV) with the inspect_evals client, `--reasoning-effort max` and `--max-tokens 163840` (the card's
+  single-turn generation cap, stated for HLE). The `RedHatAI_GLM-5.3-Flash-NVFP4` dirs (B200, vLLM nightly, FP8 KV,
   TP=4 for swe-bench-verified) are a different run and not part of the pair.
 - **Serving topology for multi-turn tasks.** swe-bench-*, deepswe-1.1, bfcl, tau2-bench and tau3-bench
   export `TP=8 DP=1` in `local_orchestrator.sh` instead of TP=2 × DP=4. vLLM's prefix cache is per replica, and
@@ -487,6 +501,17 @@ and `amd_Qwen3.8-27B-Quark-AWQ-MXFP4` copies of these tasks ran before the fixes
     exclude `solution/` from the public mirror (issue drafted for harbor-framework/terminal-bench-2-1). Protocol
     chosen with the user for that run: rerun the leaked sample and every time-limit failure once at a higher
     `--time-limit` via `--sample-id`, audit the rerun, and count any repeat leak as a failure.
+  - GLM-5.3-Flash-MXFP4xFP8 (2026-11): three leaked passes in one run, through three more routes. `raman-fitting`
+    web-searched, found `harbor-framework/terminal-bench-2` on GitHub and fetched its own `tests/` and
+    `solution/solve.sh`. `extract-elf` found the Terminal-Bench 1 copy of the same task
+    (`laude-institute/terminal-bench` → `harbor-framework/terminal-bench-1`, `original-tasks/<name>/`, with
+    `solution.sh` and the reference inside `tests/test_outputs.py`). `fix-ocaml-gc` downloaded OCaml's upstream history,
+    found the commit the task tree was cut from and diffed against it to locate the injected bug. So search for
+    fetches of either Terminal-Bench repo (and the HF mirrors), and for tasks built on a real project, for the
+    project's own upstream source at the base commit. The FP8 base model's run (2026-10) leaked two other samples
+    through the same two Terminal-Bench routes (`kv-store-grpc` from the TB1 repo, `mteb-retrieve` from
+    `harbor-framework/terminal-bench-2`): both models scored 0.831 raw, 0.809 and 0.798 leak-adjusted. Which samples
+    leak differs from run to run, so compare leak-adjusted numbers.
 - **livecodebench.** The tasks set no network policy, so the agent has internet (the fork changes nothing). Audit
   for lookups of the problem's published solutions.
 - **Any new task with tools.** Check each `task.toml` network policy against what the runner enforces (after a run,
@@ -503,6 +528,8 @@ logs. Read `sample.events`, not `sample.messages`: context compaction drops earl
 `tools/leak_audit.py` runs this scan (plus the canary check below) over `.eval` files or log dirs and prints every hit
 with the sample's score; run it with the client venv's python, `--offline` for tasks whose agents must have no network,
 `--out hits.jsonl` to keep the hits for hand review. It finds the hits; deciding which are leaks is still yours.
+Run it on the final `.eval` only, not on a `logs/` dir that still holds a superseded run: its hits then mix both runs
+(each hit's `log` field says which), and a leak in the final run is easy to misattribute or miss.
 
 ```python
 import json, re

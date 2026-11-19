@@ -28,6 +28,13 @@ repository was not public when this dir was written (2026-10-27; it was being up
 `config.json` declares MXFP4 weights with dynamic FP8 input activations (and which layers it covers: experts only, or
 dense linear layers too), that its `generation_config.json` matches the base model's (temperature 1.0, top_p 0.95,
 no top_k), and record the revision here. The KV cache is BF16 on Hopper for both models of the pair (see `serve.sh`).
+Evaluated: `inference-optimization/GLM-5.3-Flash-MXFP4xFP8` revision `d5ea13e50a801fe297dc79a3953dcc0203852ba3`
+(the corrected `config.json` described under Patches; weights unchanged from `662b3cc`; served from a local copy via
+`MODEL_PATH`, under the served name `RedHatAI/GLM-5.3-Flash-MXFP4xFP8`). Experts: MXFP4 weights (group 32) with dynamic per-group FP8 activations;
+dense MLP, shared experts and the MLA projections of every fourth layer: FP8 block weights with dynamic FP8
+activations; everything else as in the base model. `generation_config.json`, chat template and tokenizer are
+byte-identical to zai-org/GLM-5.3-Flash. vLLM loads the experts with `CompressedTensorsW4A8Mxfp4MoEMethod` on the
+Humming MXFP4 MoE backend (FP8 activation schema, no fallback) and the dense layers with `CompressedTensorsW8A8Fp8`.
 
 ## Files
 
@@ -41,7 +48,7 @@ no top_k), and record the revision here. The KV cache is BF16 on Hopper for both
   threshold); identical in the two dirs apart from `MODEL`.
 - `server_requirements.txt` / `client_requirements.txt` — `pip freeze` of the vLLM server environment and of the
   Inspect venv that produce the results, with the host (GPUs, driver, CUDA, Python) in the header. Written after the
-  final run; not present yet.
+  final run.
 - `local_orchestrator.sh` — runs everything in your local dev environment: starts `serve.sh` from the vLLM podman
   image (`VLLM_IMAGE`, by default the pinned one) or a venv (`VLLM_VENV`) through `tools/vllm_server.sh` (GPUs 0-7,
   port 8000, one TP=8 replica, the HF cache and the task dir mounted in podman mode), points Docker at the rootless
@@ -108,10 +115,6 @@ Always smoke-test first: `./local_orchestrator.sh --limit 2`
 
 ## Results
 
-Not run yet. `run_eval.sh` records the configuration below; fill the tables from the final `.eval` log (AGENTS.md,
-section 5) after the leak audit of section 11 (the tasks are networked: scan every trajectory for downloads of the
-benchmark's own `solution/` or `tests/` files), with sample errors counted as failures.
-
 With model generation config:
 
 `temperature=1.0, top_p=0.95, top_k unset, reasoning_effort=max, max_tokens=65536 (per turn), max_connections=89, max_sandboxes=89, time_limit=7200s, client_timeout=7200, tool_timeout=300s, override_cpus=0, kv_cache_dtype=bfloat16, TP=8 DP=1 with MTP (num_speculative_tokens=5), max_model_len=262144, epochs=1`
@@ -120,13 +123,34 @@ the following scores and token stats are obtained:
 
 | metric | value |
 |---|---|
-| | |
+| accuracy (pass@1, all samples, leaked samples counted as failures) | 0.798 (71 of 89) |
+| stderr | 0.043 |
+| accuracy as scored by the verifier (leaked passes included) | 0.831 (74 of 89), stderr 0.040 |
+| solution leaks (section 11 audit, all passed and counted as failures above) | 3: `raman-fitting` (fetched its own `tests/` and `solution/solve.sh` from `harbor-framework/terminal-bench-2` on GitHub), `extract-elf` (fetched the Terminal-Bench 1 copy of the task, `solution.sh` and `tests/test_outputs.py`, from `laude-institute/terminal-bench`), `fix-ocaml-gc` (downloaded OCaml's upstream source at the task's base commit and diffed against it to locate the injected bug) |
+| samples | 89 × 1 epoch |
+| truncated (max_tokens) | 0 |
+| time-limit hits (7200 s) | 2 (`extract-moves-from-video` failed, `make-mips-interpreter` passed) |
+| sample errors | 0 |
 
 | tokens / sample | input | output | reasoning |
 |---|---|---|---|
-| | | | |
+| mean | 3,340,693 | 64,533 | 51,021 |
+| median | 590,770 | 31,828 | 21,836 |
+| max | 74,297,120 | 597,169 | 439,288 |
+
+Input tokens are summed over all turns of a sample (each turn resends the history; most of it is served from the
+prefix cache). Reasoning tokens are part of the output tokens.
 
 ## Patches for upstream
+
+- **Checkpoint `config.json` (fixed in the model repo at `d5ea13e`).** The `dense` group's first two
+  targets were anchored on the checkpoint's module path (`re:.*language_model\.layers\....`), but vLLM matches `re:`
+  targets against its own module names (`language_model.model.layers....`) and does not remap regexes, so those
+  layers were built unquantized and loading failed with `KeyError: 'layers.0.mlp.down_proj.weight_scale'`. The
+  fix drops the `language_model\.` anchor:
+  `re:.*layers\.(3|7|11|15|19|23|27|31|35|39|43|45)\.self_attn\.(q_a_proj|q_b_proj|kv_a_proj_with_mqa|o_proj)$` and
+  `re:.*layers\.\d+\.mlp\.(gate|up|down)_proj$`. Weights are unchanged; every non-expert module with a `weight_scale`
+  in the checkpoint matches a target and none without one does.
 
 None (dataset/task). Known tooling behavior, documented for the run: Inspect's `vllm` provider does not learn the
 served context window (262,144) in time for the ReAct agent's compaction threshold, which resolves at sample start,

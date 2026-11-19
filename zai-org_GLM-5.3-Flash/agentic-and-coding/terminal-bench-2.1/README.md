@@ -40,7 +40,7 @@ cache is BF16 on Hopper for both models of the pair (see `serve.sh`).
   threshold); identical in the two dirs apart from `MODEL`.
 - `server_requirements.txt` / `client_requirements.txt` — `pip freeze` of the vLLM server environment and of the
   Inspect venv that produce the results, with the host (GPUs, driver, CUDA, Python) in the header. Written after the
-  final run; not present yet.
+  final run.
 - `local_orchestrator.sh` — runs everything in your local dev environment: starts `serve.sh` from the vLLM podman
   image (`VLLM_IMAGE`, by default the pinned one) or a venv (`VLLM_VENV`) through `tools/vllm_server.sh` (GPUs 0-7,
   port 8000, one TP=8 replica, the HF cache and the task dir mounted in podman mode), points Docker at the rootless
@@ -101,10 +101,6 @@ Always smoke-test first: `./local_orchestrator.sh --limit 2`
 
 ## Results
 
-Not run yet. `run_eval.sh` records the configuration below; fill the tables from the final `.eval` log (AGENTS.md,
-section 5) after the leak audit of section 11 (the tasks are networked: scan every trajectory for downloads of the
-benchmark's own `solution/` or `tests/` files), with sample errors counted as failures.
-
 With model generation config:
 
 `temperature=1.0, top_p=0.95, top_k unset, reasoning_effort=max, max_tokens=65536 (per turn), max_connections=89, max_sandboxes=89, time_limit=7200s, client_timeout=7200, tool_timeout=300s, override_cpus=0, kv_cache_dtype=bfloat16, TP=8 DP=1 with MTP (num_speculative_tokens=5), max_model_len=262144, epochs=1`
@@ -113,11 +109,23 @@ the following scores and token stats are obtained:
 
 | metric | value |
 |---|---|
-| | |
+| accuracy (pass@1, all samples, leaked samples counted as failures) | 0.809 (72 of 89) |
+| stderr | 0.042 |
+| accuracy as scored by the verifier (leaked passes included) | 0.831 (74 of 89), stderr 0.040 |
+| solution leaks (section 11 audit, all passed and counted as failures above) | 2: `kv-store-grpc` (fetched the Terminal-Bench 1 copy of the task, `solution.sh` and `tests/test_outputs.py`, from `laude-institute/terminal-bench`), `mteb-retrieve` (fetched its own `tests/` and `solution/solve.sh` from `harbor-framework/terminal-bench-2` on GitHub and ran the reference solution's code) |
+| samples | 89 × 1 epoch |
+| truncated (max_tokens) | 0 |
+| time-limit hits (7200 s) | 5 (`model-extraction-relu-logits`, `regex-chess`, `sam-cell-seg` passed; `extract-moves-from-video`, `train-fasttext` failed) |
+| sample errors | 0 |
 
 | tokens / sample | input | output | reasoning |
 |---|---|---|---|
-| | | | |
+| mean | 4,309,772 | 91,391 | 74,267 |
+| median | 844,618 | 39,857 | 31,679 |
+| max | 43,817,271 | 1,043,894 | 1,004,664 |
+
+Input tokens are summed over all turns of a sample (each turn resends the history; most of it is served from the
+prefix cache). Reasoning tokens are part of the output tokens.
 
 ## Patches for upstream
 

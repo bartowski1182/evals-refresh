@@ -37,7 +37,10 @@ Keep them in `local_env_notes.local.md` next to this file, which git ignores, an
 - Qwen4Exp (Qwen3.8-Flash-Next) keeps its 51B n-gram table in pinned host memory. While a server loads, every DP
   worker holds a private host copy (about 136 GB each for the BF16 table), so two DP=4 servers starting together need
   about 1.1 TB of RAM and evict the page cache. Start the servers one after the other.
-- On a shared host, check `nvidia-smi` (`amd-smi` on AMD) before claiming GPUs. Stop processes by exact PID:
+- On a shared host, use its GPU reservation system if it has one (e.g. canhazgpu's `chg run --gpus N -- <cmd>`, which
+  queues, sets `CUDA_VISIBLE_DEVICES` and releases on exit; `local_orchestrator.sh` inherits `CUDA_VISIBLE_DEVICES`).
+  Idle-looking GPUs may be reserved by someone whose server is still loading, and a server started on them fails or
+  evicts theirs. Otherwise check `nvidia-smi` (`amd-smi` on AMD) before claiming GPUs. Stop processes by exact PID:
   `pgrep -f`/`pkill -f` patterns can match other users' processes or your own shell.
 - **`nvidia-smi` idle at 0 MiB is not enough to claim a GPU.** Some B200s return `CUDA_ERROR_UNKNOWN` from
   `cuDevicePrimaryCtxRetain` / `torch.cuda.set_device` while looking free (no process, Default compute mode). Probe
@@ -79,7 +82,10 @@ Keep them in `local_env_notes.local.md` next to this file, which git ignores, an
   The same pattern serves a vLLM release: pull `docker.io/vllm/vllm-openai:v<version>` and pin it by digest (query
   `registry-1.docker.io/v2/vllm/vllm-openai/manifests/v<version>` with an anonymous pull token; the
   `Docker-Content-Digest` header is the digest). To serve a Hub id from inside the container, mount the host's HF cache
-  (`HF_HOME`) on `/root/.cache/huggingface` and pass `HF_TOKEN` and `HF_HUB_OFFLINE` through; `podman run -e VAR`
+  (`HF_HOME`) on `/root/.cache/huggingface` and pass `HF_TOKEN` and `HF_HUB_OFFLINE` through; to serve a snapshot of a
+  shared hub cache that is not under `HF_HOME` as a local path, mount the whole cache read-only at its host path (the
+  snapshot's files are relative symlinks into the cache's `blobs/`, which may link on into a deduplicated store, so
+  mounting only the snapshot directory leaves them dangling; hardlinking the blobs fails on files you don't own); `podman run -e VAR`
   without a value forwards VAR only when it is set on the host, so unset overrides fall back to `serve.sh`'s defaults.
   A server that the task sandboxes (Docker) must reach, such as the tau3-bench user simulator, has to be published on
   all interfaces (`-p PORT:PORT`), not on 127.0.0.1: the sandboxes call the host's primary IP. With rootless podman and
