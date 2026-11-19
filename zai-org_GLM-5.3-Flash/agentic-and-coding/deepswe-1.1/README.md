@@ -42,7 +42,7 @@ cache is BF16 on Hopper for both models of the pair (see `serve.sh`).
   verifier fix (see Patches).
 - `server_requirements.txt` / `client_requirements.txt` — `pip freeze` of the vLLM server environment and of the
   Inspect venv that produce the results, with the host (GPUs, driver, CUDA, Python) in the header. Written after the
-  final run; not present yet.
+  final run.
 - `local_orchestrator.sh` — runs everything in your local dev environment: starts `serve.sh` from the vLLM podman
   image (`VLLM_IMAGE`, by default the pinned one) or a venv (`VLLM_VENV`) through `tools/vllm_server.sh` (GPUs 0-7,
   port 8000, one TP=8 replica, the HF cache and the task dir mounted in podman mode), points Docker at the rootless
@@ -113,9 +113,6 @@ Always smoke-test first: `./local_orchestrator.sh --limit 2`
 
 ## Results
 
-Not run yet. `run_eval.sh` records the configuration below; fill the tables from the final `.eval` log (AGENTS.md,
-section 5) after the leak audit of section 11, with sample errors counted as failures.
-
 With model generation config:
 
 `temperature=1.0, top_p=0.95, top_k unset, reasoning_effort=max, max_tokens=65536 (per turn), no message limit, max_connections=48, max_sandboxes=48, time_limit=14400s, client_timeout=7200, tool_timeout=300s, override_cpus=0, kv_cache_dtype=bfloat16, TP=8 DP=1 with MTP (num_speculative_tokens=5), max_model_len=262144, epochs=1`
@@ -124,11 +121,23 @@ the following scores and token stats are obtained:
 
 | metric | value |
 |---|---|
-| | |
+| accuracy (pass@1, all samples) | 0.681 (77 of 113) |
+| stderr | 0.044 |
+| samples | 113 × 1 epoch |
+| truncated (max_tokens) | 0 |
+| time-limit hits | 0 |
+| sample errors | 1 (counted as a failure) |
+| solution leaks (section 11 audit) | 0 (470 outbound attempts, none reached the network) |
 
 | tokens / sample | input | output | reasoning |
 |---|---|---|---|
-| | | | |
+| mean | 15,764,239 | 114,703 | 74,666 |
+| median | 12,586,004 | 103,593 | 66,465 |
+| max | 193,416,608 | 389,049 | 353,017 |
+
+Input tokens are summed over all turns of a sample (each turn resends the history; most of it is served from the
+prefix cache). Reasoning tokens are part of the output tokens. Sample error: `datacurve/scriggo-method-declarations`
+(`Compaction insufficient: 242,752 tokens still exceeds threshold of 235,929`, Inspect's ReAct compaction).
 
 ## Patches for upstream
 

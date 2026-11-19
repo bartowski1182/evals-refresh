@@ -17,10 +17,12 @@ export MODEL_PATH="${MODEL_PATH:-$HOME/Muse-Spark-Open-816B-A42B-MXFP4xFP8}"
 export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
 export VLLM_ENGINE_READY_TIMEOUT_S="${VLLM_ENGINE_READY_TIMEOUT_S:-3600}"
 DEFAULT_VLLM_IMAGE="localhost/vllm-dev:latest"
-# The image's vLLM is an editable install of this source checkout (the vLLM branch with Muse Spark support), mounted
-# where the image expects it.
-VLLM_SRC="${VLLM_SRC:-$HOME/vllm}"
-VLLM_PODMAN_ARGS=(-v "$VLLM_SRC:/workspace/vllm")
+# The image carries its built vLLM tree (an editable install) at /workspace/vllm and serves from it as is. Set VLLM_SRC to
+# a host checkout of the same commit to mount it there instead (Python edits then apply without a rebuild); the image's
+# entrypoint, which copies the compiled extensions into a mounted tree, does not run here (vllm_server.sh replaces it
+# with serve.sh), so extract them into the checkout once first:
+#   podman run --rm --entrypoint cat localhost/vllm-dev:latest /opt/vllm-build-artifacts.tar | tar -xf - -C "$VLLM_SRC"
+VLLM_PODMAN_ARGS=(${VLLM_SRC:+-v "$VLLM_SRC:/workspace/vllm"})
 INSPECT_VENV="${INSPECT_VENV:-$HOME/.venvs/inspect}"
 source "$(dirname "${BASH_SOURCE[0]}")/../../../tools/vllm_server.sh"
 mkdir -p logs

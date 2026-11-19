@@ -1,18 +1,23 @@
 #!/usr/bin/env bash
-# Run the GLM-5.3-Flash pair's agentic benchmarks one after the other, interactively (meant for a tmux session).
-# For each (model, task) in order: smoke test (--limit 2, logs in logs/smoke/), a summary of its samples and a pause so
-# you can read them, the full run (logs in logs/), the section 11 leak audit (tools/leak_audit.py), the two
+# Run the GLM-5.3-Flash pair's benchmarks one after the other, interactively (meant for a tmux session).
+# For each (model, task) in order: smoke test (--limit 2 for agentic tasks, --limit 5 otherwise; logs in logs/smoke/), a summary of its samples and a pause so
+# you can read them, the full run (logs in logs/), the section 11 leak audit of the new .eval (tools/leak_audit.py;
+# agentic tasks only), the two
 # requirements files, and a pause. Every run goes through the task dir's own local_orchestrator.sh, so what is
 # measured stays in serve.sh / run_eval.sh; this script only sequences the dirs and waits for the GPUs between them.
 #
-#   tools/run_glm53_flash_pair.sh                      everything: 2 models x 3 tasks, shortest task first
+#   tools/run_glm53_flash_pair.sh                      2 models x the 3 agentic tasks, shortest task first
+#   TASKS="gpqa-diamond aime-2026 mmlu-pro" tools/run_glm53_flash_pair.sh      the knowledge-and-reasoning tasks
 #   MODELS="zai-org_GLM-5.3-Flash" TASKS="terminal-bench-2.1" tools/run_glm53_flash_pair.sh      a subset
 #   SKIP_SMOKE=1        no smoke tests               ONLY_SMOKE=1   stop after each smoke test
 #   AUTO=1              never pause (continue at every prompt; for an unattended run)
 #   AUTO=done           pause only after each smoke test (to read its samples), not after the full runs
+#   With AUTO=1 a smoke test whose samples fail the mechanical checks (sample error, no separate reasoning part,
+#   stop_reason other than stop or tool_calls, no score) skips that task's full run instead of continuing.
 #   REQUIREMENTS_ONLY=1 only (re)write the two requirements files of the selected dirs from their logs/serve.log
 #   RUN_ARGS="..."      extra args for every full run (e.g. --sandbox-prebuilt)
-#   INSPECT_VENV_DEEPSWE / INSPECT_VENV_SWEBENCH / INSPECT_VENV_TB    client venvs (defaults = the orchestrators')
+#   INSPECT_VENV_DEEPSWE / INSPECT_VENV_SWEBENCH / INSPECT_VENV_TB / INSPECT_VENV_EVALS   client venvs (defaults =
+#                                            the orchestrators'; INSPECT_VENV_EVALS for the inspect_evals tasks)
 #   MODEL_PATH_FP8 / MODEL_PATH_MXFP4XFP8    local checkpoint copies (else the Hub id through HF_HOME; export
 #                                            HF_HUB_OFFLINE=1 once downloaded)
 #   VLLM_VENV or VLLM_IMAGE, HF_HOME, HF_TOKEN, DOCKER_HOST, PORT, MAX_CONNECTIONS, ...   pass through as usual
@@ -29,7 +34,14 @@ venv_for() {
     deepswe-1.1) echo "${INSPECT_VENV_DEEPSWE:-$HOME/.venvs/inspect-harbor-fix}" ;;
     swe-bench-verified) echo "${INSPECT_VENV_SWEBENCH:-$HOME/.venvs/inspect-swebench}" ;;
     terminal-bench-2.1) echo "${INSPECT_VENV_TB:-$HOME/.venvs/inspect-harbor}" ;;
+    gpqa-diamond|aime-2026|mmlu-pro) echo "${INSPECT_VENV_EVALS:-$HOME/.venvs/inspect}" ;;
     *) echo "unknown task $1" >&2; exit 1 ;;
+  esac
+}
+category_for() {
+  case "$1" in
+    gpqa-diamond|aime-2026|mmlu-pro) echo knowledge-and-reasoning ;;
+    *) echo agentic-and-coding ;;
   esac
 }
 model_path_for() {
@@ -49,21 +61,27 @@ ask() {  # $1 = prompt, $2 = kind (smoke|done); sets REPLY to c, s or q
 }
 
 wait_gpus_idle() {  # a server from the previous run must be gone before the next one starts (AGENTS.md, section 9)
-  local used i
+  # Only the GPUs this run uses (CUDA_VISIBLE_DEVICES, e.g. set by a GPU reservation system): on a shared host the
+  # other GPUs may be busy with other users' jobs for days.
+  local used i ids="${CUDA_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7}"
   for i in $(seq 90); do
-    used=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits | sort -n | tail -1)
+    used=$(nvidia-smi -i "$ids" --query-gpu=memory.used --format=csv,noheader,nounits | sort -n | tail -1)
     [ "${used:-0}" -lt 1024 ] && return 0
     echo "waiting for the GPUs to free up (max ${used} MiB in use)"; sleep 10
   done
   echo "GPUs still busy after 15 min; check nvidia-smi" >&2; return 1
 }
 
-smoke_summary() {  # $1 = log dir
+smoke_summary() {  # $1 = log dir; exit status 1 if the newest smoke log fails the mechanical checks
   "$INSPECT_VENV/bin/python" - "$1" <<'PY'
-import glob, sys
+import glob, os, sys
 from inspect_ai.log import read_eval_log
-for f in sorted(glob.glob(sys.argv[1] + "/*.eval")):
+bad = []
+files = sorted(glob.glob(sys.argv[1] + "/*.eval"), key=os.path.getmtime)
+for f in files[-1:]:
     log = read_eval_log(f)
+    if log.status != "success" or not log.samples:
+        bad.append(f"status={log.status}")
     print(f"{f}: status={log.status}")
     print("  model_generate_config:", log.eval.model_generate_config)
     for s in log.samples or []:
@@ -74,6 +92,12 @@ for f in sorted(glob.glob(sys.argv[1] + "/*.eval")):
               f" stop_reason={s.output.stop_reason if s.output else None} reasoning_part={reasoning}"
               f" error={bool(s.error)} limit={s.limit.type if s.limit else None}"
               f" tokens={s.output.usage if s.output and s.output.usage else None}")
+        stop = s.output.stop_reason if s.output and s.output.choices else None
+        if s.error or not reasoning or stop not in ("stop", "tool_calls") or not s.scores:
+            bad.append(f"{s.id}: error={bool(s.error)} reasoning_part={reasoning} stop_reason={stop} scored={bool(s.scores)}")
+for b in bad:
+    print("  SMOKE CHECK FAILED:", b)
+sys.exit(1 if bad or not files else 0)
 PY
 }
 
@@ -112,8 +136,9 @@ write_requirements() {  # headers as in the other dirs: date, GPUs, OS, driver, 
 }
 
 run_one() {
-  local model=$1 task=$2 dir status mp
-  dir="$ROOT/$model/agentic-and-coding/$task"
+  local model=$1 task=$2 dir status mp category limit
+  category=$(category_for "$task"); limit=2; [ "$category" = agentic-and-coding ] || limit=5
+  dir="$ROOT/$model/$category/$task"
   cd "$dir" || exit 1
   export INSPECT_VENV; INSPECT_VENV=$(venv_for "$task")
   [ -x "$INSPECT_VENV/bin/python" ] || { echo "client venv $INSPECT_VENV missing (see $dir/README.md, Setup)" >&2; exit 1; }
@@ -127,32 +152,44 @@ run_one() {
   if [ "${SKIP_SMOKE:-0}" != 1 ]; then
     wait_gpus_idle || exit 1
     mkdir -p logs/smoke
-    echo "== smoke test (--limit 2), logs in $dir/logs/smoke"
-    LOG_DIR=./logs/smoke EPOCHS=1 ./local_orchestrator.sh --limit 2 2>&1 | tee logs/smoke/full.log
+    echo "== smoke test (--limit $limit), logs in $dir/logs/smoke"
+    LOG_DIR=./logs/smoke EPOCHS=1 ./local_orchestrator.sh --limit "$limit" 2>&1 | tee logs/smoke/full.log
     status=${PIPESTATUS[0]}
     echo "== smoke test exited with $status"
-    smoke_summary logs/smoke || true
+    local smoke_ok=1
+    smoke_summary logs/smoke || smoke_ok=0
     echo "Read the samples (another shell: inspect view --log-dir $dir/logs/smoke). Check: reasoning parsed into a"
     echo "separate part, stop_reason=stop, the intended config recorded, and in logs/serve.log the quantization"
     echo "method, KV cache dtype (bfloat16), MTP, and the GPU KV cache size against the task's concurrency."
     ask "Start the full run of $model / $task?" smoke
+    if [ "$smoke_ok" = 0 ] && [ "${AUTO:-0}" = 1 ]; then
+      echo "== smoke checks failed; skipping the full run of $model / $task"; return
+    fi
     case "$REPLY" in s) return ;; q) exit 0 ;; esac
     [ "${ONLY_SMOKE:-0}" = 1 ] && return
   fi
 
   wait_gpus_idle || exit 1
   echo "== full run, logs in $dir/logs"
+  touch logs/.run_start
   # shellcheck disable=SC2086
   ./local_orchestrator.sh ${RUN_ARGS:-} 2>&1 | tee logs/full.log
   status=${PIPESTATUS[0]}
   echo "== full run exited with $status ($(date))"
 
-  echo "== leak audit (AGENTS.md, section 11)"
-  local offline=()
-  [ "$task" != terminal-bench-2.1 ] && offline=(--offline)
-  "$INSPECT_VENV/bin/python" "$ROOT/tools/leak_audit.py" "${offline[@]}" --out logs/leak_hits.jsonl logs/*.eval \
-    2>&1 | tee logs/leak_audit.txt | tail -5
-  echo "full audit output in $dir/logs/leak_audit.txt; review the hits by hand (section 11 lists what counts as a leak)"
+  # the .eval this run wrote (not every log in logs/: a superseded run there would mix into the audit)
+  local new_eval
+  new_eval=$(find logs -maxdepth 1 -name '*.eval' -newer logs/.run_start -printf '%T@ %p\n' | sort -n | tail -1 | cut -d' ' -f2-)
+  if [ -z "$new_eval" ]; then
+    echo "no new .eval in $dir/logs; skipping the leak audit"
+  elif [ "$category" = agentic-and-coding ]; then
+    echo "== leak audit of $new_eval (AGENTS.md, section 11)"
+    local offline=()
+    [ "$task" != terminal-bench-2.1 ] && offline=(--offline)
+    "$INSPECT_VENV/bin/python" "$ROOT/tools/leak_audit.py" "${offline[@]}" --out logs/leak_hits.jsonl "$new_eval" \
+      2>&1 | tee logs/leak_audit.txt | tail -5
+    echo "full audit output in $dir/logs/leak_audit.txt; review the hits by hand (section 11 lists what counts as a leak)"
+  fi
 
   write_requirements
   ask "Done with $model / $task." done
@@ -162,7 +199,7 @@ run_one() {
 echo "Models: $MODELS"; echo "Tasks: $TASKS"; echo "Repo: $ROOT"
 for model in $MODELS; do
   for task in $TASKS; do
-    [ -d "$ROOT/$model/agentic-and-coding/$task" ] || { echo "no dir $model/agentic-and-coding/$task" >&2; exit 1; }
+    [ -d "$ROOT/$model/$(category_for "$task")/$task" ] || { echo "no dir $model/$(category_for "$task")/$task" >&2; exit 1; }
     [ -x "$(venv_for "$task")/bin/python" ] || echo "WARNING: client venv for $task not found at $(venv_for "$task")"
   done
 done

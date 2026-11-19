@@ -27,6 +27,13 @@ repository was not public when this dir was written (2026-10-27; it was being up
 `config.json` declares MXFP4 weights with dynamic FP8 input activations (and which layers it covers: experts only, or
 dense linear layers too), that its `generation_config.json` matches the base model's (temperature 1.0, top_p 0.95,
 no top_k), and record the revision here. The KV cache is BF16 on Hopper for both models of the pair (see `serve.sh`).
+Evaluated: `inference-optimization/GLM-5.3-Flash-MXFP4xFP8` revision `d5ea13e50a801fe297dc79a3953dcc0203852ba3`
+(the corrected `config.json` described under Patches; weights unchanged from `662b3cc`; served from a local copy via
+`MODEL_PATH`, under the served name `RedHatAI/GLM-5.3-Flash-MXFP4xFP8`). Experts: MXFP4 weights (group 32) with dynamic per-group FP8 activations;
+dense MLP, shared experts and the MLA projections of every fourth layer: FP8 block weights with dynamic FP8
+activations; everything else as in the base model. `generation_config.json`, chat template and tokenizer are
+byte-identical to zai-org/GLM-5.3-Flash. vLLM loads the experts with `CompressedTensorsW4A8Mxfp4MoEMethod` on the
+Humming MXFP4 MoE backend (FP8 activation schema, no fallback) and the dense layers with `CompressedTensorsW8A8Fp8`.
 
 ## Files
 
@@ -40,7 +47,7 @@ no top_k), and record the revision here. The KV cache is BF16 on Hopper for both
   threshold); identical in the two dirs apart from `MODEL`.
 - `server_requirements.txt` / `client_requirements.txt` — `pip freeze` of the vLLM server environment and of the
   Inspect venv that produce the results, with the host (GPUs, driver, CUDA, Python) in the header. Written after the
-  final run; not present yet.
+  final run.
 - `local_orchestrator.sh` — runs everything in your local dev environment: starts `serve.sh` from the vLLM podman
   image (`VLLM_IMAGE`, by default the pinned one) or a venv (`VLLM_VENV`) through `tools/vllm_server.sh` (GPUs 0-7,
   port 8000, one TP=8 replica, the HF cache and the task dir mounted in podman mode), points Docker at the rootless
@@ -108,9 +115,6 @@ Always smoke-test first: `./local_orchestrator.sh --limit 2`
 
 ## Results
 
-Not run yet. `run_eval.sh` records the configuration below; fill the tables from the final `.eval` log (AGENTS.md,
-section 5) after the leak audit of section 11, with sample errors counted as failures.
-
 With model generation config:
 
 `temperature=1.0, top_p=0.95, top_k unset, reasoning_effort=max, max_tokens=65536 (per turn), message_limit=200, max_connections=48, max_sandboxes=48, time_limit=14400s, client_timeout=7200, tool_timeout=210s, kv_cache_dtype=bfloat16, TP=8 DP=1 with MTP (num_speculative_tokens=5), max_model_len=262144, epochs=1`
@@ -119,13 +123,34 @@ the following scores and token stats are obtained:
 
 | metric | value |
 |---|---|
-| | |
+| accuracy (pass@1, all samples) | 0.762 (381 of 500) |
+| stderr | 0.019 |
+| samples | 500 × 1 epoch |
+| truncated (max_tokens) | 0 |
+| time-limit hits | 0 |
+| message-limit hits (200) | 89 (scored on the final repository state; 55 of them pass) |
+| sample errors | 0 |
+| solution leaks (section 11 audit) | 0 (567 outbound attempts, none reached the network) |
 
 | tokens / sample | input | output | reasoning |
 |---|---|---|---|
-| | | | |
+| mean | 2,618,230 | 36,142 | 29,079 |
+| median | 1,933,698 | 30,750 | 23,534 |
+| max | 12,222,728 | 134,917 | 120,093 |
+
+Input tokens are summed over all turns of a sample (each turn resends the history; most of it is served from the
+prefix cache). Reasoning tokens are part of the output tokens.
 
 ## Patches for upstream
+
+- **Checkpoint `config.json` (fixed in the model repo at `d5ea13e`).** The `dense` group's first two
+  targets were anchored on the checkpoint's module path (`re:.*language_model\.layers\....`), but vLLM matches `re:`
+  targets against its own module names (`language_model.model.layers....`) and does not remap regexes, so those
+  layers were built unquantized and loading failed with `KeyError: 'layers.0.mlp.down_proj.weight_scale'`. The
+  fix drops the `language_model\.` anchor:
+  `re:.*layers\.(3|7|11|15|19|23|27|31|35|39|43|45)\.self_attn\.(q_a_proj|q_b_proj|kv_a_proj_with_mqa|o_proj)$` and
+  `re:.*layers\.\d+\.mlp\.(gate|up|down)_proj$`. Weights are unchanged; every non-expert module with a `weight_scale`
+  in the checkpoint matches a target and none without one does.
 
 (1) Solution leak in the default images: `inspect_evals`' default Epoch AI images
 (`ghcr.io/epoch-research/swe-bench.eval.x86_64.<id>`) keep every release tag of the project, so the reference fix of
