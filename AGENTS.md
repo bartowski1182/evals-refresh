@@ -403,7 +403,9 @@ revert these departures:
   fix is in the model repo at `d5ea13e` (only `config.json` changed), the revision the READMEs record, under the served name `RedHatAI/GLM-5.3-Flash-MXFP4xFP8`. The pair also carries gpqa-diamond (3 epochs), aime-2026 (8) and mmlu-pro (1), added on
   2026-11-19 at the user's request (epochs too): same `serve.sh` and orchestrator as the agentic dirs (one TP=8
   replica, MTP, BF16 KV) with the inspect_evals client, `--reasoning-effort max` and `--max-tokens 163840` (the card's
-  single-turn generation cap, stated for HLE). The `RedHatAI_GLM-5.3-Flash-NVFP4` dirs (B200, vLLM nightly, FP8 KV,
+  single-turn generation cap, stated for HLE). Both models ran them on 2026-11-20 (about 35 min AIME, 1 h GPQA, 2 h 45 min MMLU-Pro per model
+  on 8x H200, KV pool far above need); 0.5-1% of the answers still hit the 163840 cap (AIME problem 15 in 6 of 8 epochs for
+  both models), so a lower cap would cost accuracy. The `RedHatAI_GLM-5.3-Flash-NVFP4` dirs (B200, vLLM nightly, FP8 KV,
   TP=4 for swe-bench-verified) are a different run and not part of the pair.
 - **Serving topology for multi-turn tasks.** swe-bench-*, deepswe-1.1, bfcl, gdpval-aa, tau2-bench and tau3-bench
   export `TP=8 DP=1` in `local_orchestrator.sh` instead of TP=2 × DP=4. vLLM's prefix cache is per replica, and

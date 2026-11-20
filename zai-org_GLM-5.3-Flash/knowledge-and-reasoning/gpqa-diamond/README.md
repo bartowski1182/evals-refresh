@@ -30,7 +30,7 @@ cache is BF16 on Hopper for both models of the pair (see `serve.sh`).
   params, reasoning effort, max tokens, concurrency); identical in the two dirs apart from `MODEL`.
 - `server_requirements.txt` / `client_requirements.txt` — `pip freeze` of the vLLM server environment and of the
   Inspect venv that produce the results, with the host (GPUs, driver, CUDA, Python) in the header. Written after the
-  final run; not present yet.
+  final run.
 - `local_orchestrator.sh` — runs everything in your local dev environment: starts `serve.sh` from the vLLM podman
   image (`VLLM_IMAGE`, by default the pinned one) or a venv (`VLLM_VENV`) through `tools/vllm_server.sh` (GPUs 0-7,
   port 8000, one TP=8 replica, the HF cache and the task dir mounted in podman mode), waits for the server, activates
@@ -78,9 +78,6 @@ Always smoke-test first: `EPOCHS=1 ./local_orchestrator.sh --limit 5`
 
 ## Results
 
-Not run yet. `run_eval.sh` records the configuration below; fill the tables from the final `.eval` log (AGENTS.md,
-section 5), with sample errors counted as failures.
-
 With model generation config:
 
 `temperature=1.0, top_p=0.95, top_k unset, reasoning_effort=max, max_tokens=163840, max_connections=128, client_timeout=7200, kv_cache_dtype=bfloat16, TP=8 DP=1 with MTP (num_speculative_tokens=5), max_model_len=262144, epochs=3 (avg@3)`
@@ -89,11 +86,21 @@ the following scores and token stats are obtained:
 
 | metric | value |
 |---|---|
-| | |
+| accuracy (avg@3, all samples) | 0.894 (177 of 198) |
+| stderr | 0.020 |
+| per-epoch | 0.894 / 0.899 / 0.889 |
+| samples | 198 × 3 epochs |
+| truncated (max_tokens 163840) | 5 (5 questions, once each; all scored wrong) |
+| unparsed (no `ANSWER:` line, not truncated) | 0 |
+| sample errors | 0 |
 
 | tokens / sample | input | output | reasoning |
 |---|---|---|---|
-| | | | |
+| mean | 269 | 11,740 | 11,559 |
+| median | 234 | 3,842 | 3,699 |
+| max | 2,824 | 163,840 | 163,840 |
+
+Reasoning tokens are part of the output tokens. Truncated and unparsed answers are scored as wrong.
 
 ## Patches for upstream
 
